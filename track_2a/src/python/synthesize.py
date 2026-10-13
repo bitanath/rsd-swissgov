@@ -14,7 +14,7 @@ LOW = 0.05
 
 def load(split, lang):
     rows = {}
-    path = REPO / f"python/dataset/{split}/{lang}.jsonl" #TODO synthesize based on already existing data
+    path = REPO / f"python/dataset/swissgov/{split}/{lang}.jsonl" #TODO synthesize based on already existing data
     for line in open(path):
         if not line.strip():
             continue
@@ -71,7 +71,7 @@ def build(split, l1, l2, outdir):
 def main():
     ap = argparse.ArgumentParser(description="Synthetic target<->target RSD pairs (eval only)")
     ap.add_argument("--split", default="holdout", choices=["val", "holdout", "full"])
-    ap.add_argument("--outdir", default=str(REPO / "python/dataset/synthetic"))
+    ap.add_argument("--outdir", default=str(REPO / "python/dataset/swissgov/synthetic"))
     args = ap.parse_args()
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)

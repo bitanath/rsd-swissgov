@@ -165,7 +165,7 @@ def main():
     n_layers = 32
     layers = list(range(n_layers)) if args.layers == "all" else [int(x) for x in args.layers.split(",")]
 
-    data_dir = REPO / f"python/dataset/{args.split}"
+    data_dir = REPO / f"python/dataset/swissgov/{args.split}"
     rows = []
     for lang in ("de", "fr", "it"):
         with open(data_dir / f"{lang}.jsonl") as f:

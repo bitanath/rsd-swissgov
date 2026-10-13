@@ -89,51 +89,70 @@ of how well the block's features encode the human token-level difference labels
    * `Pearson r (OLS)`, `ρ (DoM)`, `AUC (DoM)` (same vs different), `Sep`
      (standardised projection gap), and per-language `ρ de/fr/it`.
 
-## Word Align method and innovation
+## Word Align method and Innovation for final classification
 
-A ─tokenize─► ia  (Na_tok subword ids)      s2w_a: subword→word
-B ─tokenize─► ib  (Nb_tok)                  s2w_b: subword→word
+Two inferences of Apertus per pair. Because Apertus is causal — a token only sees what's *before* it — you can't get both cross-contexts in one pass.
 
-prefill 1 : [ ia ++ ib ]  ──Apertus──► o1 : (Na_tok+Nb_tok, 4096)   # L15, site res_ffn
-prefill 2 : [ ib ++ ia ]  ──Apertus──► o2 : (Nb_tok+Na_tok, 4096)
+- **Pass 1 = `[B][A]`** (German then English) → English tokens sit *after* German, so they attend to it → keep the English rows = `feats_a` (English sees German).
+- **Pass 2 = `[A][B]`** (English then German) → German tokens sit *after* English → keep the German rows = `feats_b` (German sees English).
 
-pool subwords→words (mean within each whitespace word):
-   fA1 = pool(o1[:Na], s2w_a)  -> (na,4096)   # A, causal: sees only itself
-   fB1 = pool(o1[Na:], s2w_b)  -> (nb,4096)   # B in [A][B]: B sees A
-   fB2 = pool(o2[:Nb], s2w_b)  -> (nb,4096)   # B, sees only itself
-   fA2 = pool(o2[Nb:], s2w_a)  -> (na,4096)   # A in [B][A]: A sees B
-So every word gets two 4096-vectors — the same word in two contexts:
-A word i :  self = fA1[i]   cross = fA2[i]
-B word j :  self = fB2[j]   cross = fB1[j]
+In `[A][B]` alone the English tokens are first, so they'd only see themselves (useless); the German tokens would see English. In `[B][A]` it's the reverse. So you need **both orders** to get each side's vector with the other language in context.
+
+> Cost note: that is 2× a single prefill. We added a capture-only early exit (`model_capture_stop`) that breaks the layer loop at L15 → ~2× faster capture while producing **bit-identical** L15 vectors. Text generation is unaffected.
+
+### For Example
+One EN–DE pair (`admin_de_1`):
+
+```
+Apertus (frozen):     feats_a (305, 4096)   [English, sees German]
+                      feats_b (250, 4096)   [German,  sees English]
+concat:               X      (555, 4096)    # English 0..304, German 305..554
+seg:                  seg    (555,)         # 305 zeros, then 250 ones (which text)
+pad:                  pad    (555,)  bool   # padding mask (batch)
+                      |
+proj (4096->512):     (555, 512)
++ seg embed:          (555, 512)
+transformer (4L,8H):  (555, 512)            # attention across BOTH texts
+head (512->128->1):   (555, 1) -> (555,)
+sigmoid:              (555,)                # one 0-1 score per token
+```
+
+Output = 555 scores: `[0:305]` English tokens, `[305:555]` German tokens. `seg`/`pad` are bookkeeping we know from how the pair was built — nothing predicted, nothing from labels.
 
 ## Simplified Understanding
+
 The idea in one picture:
-word "Geräte"
-   read once ALONE                       read once with the OTHER language in front
-   ──────────────► fingerprint₁ (4096)   ──────────────► fingerprint₂ (4096)
-                          \                        /
-                           \                      /
-                            cosine( fingerprint₁ , fingerprint₂ )  =  ONE number 0..1
-                                          │
-                                    a few such cheap numbers
-                                          │
-                                    tiny MLP  ──►  difference score 0..1
-- Fingerprint = the 4096 numbers the model gives a word at L15 (its meaning in that reading).
-- Round trip 1: the word sits in its own document (only its own language around it).
-- Round trip 2: the word sits after the other language's text, so it can "look back" at it.
-- cosine = "how much did the word change between the two readings?" ~1 = rock-steady meaning; lower = the foreign context moved it.
-- Turns out "how much a word shifts when the other language shows up" tracks the human is-this-a-difference? label (ρ≈0.32–0.35 on 6 pairs, no training).
+
+```
+English text ──Apertus (frozen)──► per-token vectors  (n_EN, 4096)
+German  text ──Apertus (frozen)──► per-token vectors  (n_DE, 4096)
+                      |  concatenate [English ; German]  + seg marker (0/1)
+                      v
+              small transformer  (cross-attention over both texts)
+                      |
+              per-token head  ──►  one 0–1 difference score per token
+```
+
+- **Apertus stays frozen**; only the small transformer ("pair probe") is trained.
+- Because both texts sit in **one sequence**, every German token can attend to the English tokens (and vice versa) — so the model can *compare* the two languages. Scoring each side separately cannot do this; that is the whole point of the pair probe.
 
 
-## Caveats
-* These are **linear** readouts. A nonlinear head can shift correlations once trained. 
-  Used as a cheap method to directionally sort layers to capture intermediate tensors
-  for further processing.
-* `Spearman ρ (OLS)` for one 4096-d direction is a *lower bound* on a block's linear
-  information; it favours blocks where the difference signal is already linearly
-  decodable, which is exactly what we want for a cheap selection criterion.
+## Current results
 
-## Ablation table
+| method                                                  | EN–DE      | EN–FR      | EN–IT      |
+|---------------------------------------------------------|--:---------|--:---------|--:---------|
+| DiffAlign · Apertus L15 (unsupervised)                  | 32.2       | 18.2       | 36.0       |
+| DiffAlign · Apertus L14–17 sum (unsupervised)           | 31.5       | 18.4       | 36.6       |
+| **Pair probe · GRU (frozen Apertus L14–17, in-domain)** | **46.2**   | **27.3**   | **50.1**   |
+| Human annotator agreement (ceiling)                     | 56.1       | 43.6       | 65.1       |
+| _OOD · synthetic target↔target_                         | 21.7 de-fr | 19.2 de-it | 15.1 fr-it |
+
+
+*Values are token-level Spearman ×100, pooled over both texts. Pair probe = **bidirectional GRU** (final arch), single seed, best val epoch (ep5). Arch sweep (val macro / OOD macro, best-epoch): **GRU 41.2 / 18.7**, CNN 41.0 / 18.2, MLP 39.3 / 19.1, transformer 39.1 / 19.1, xattn 38.9 / 20.0, bilinear 39.2 / 17.4 — **GRU** chosen (best in-domain macro, best DE/IT; OOD within noise of CNN); FR is the only arch-sensitive language and is annotation-limited. Last row's columns are the target↔target pairs **de-fr / de-it / fr-it**, not EN–XX. DiffAlign L14–17 fusion does **not** beat L15 (mean 28.84 vs 28.81).*
+
+
+
+## Ablation table for intermediate Layers compared against Human Agreement
 
 Run: `python ablation.py --split full --limit 15 --calib-frac 0.35`
 (45 pairs; ★ = best `Spearman ρ (OLS)`, ◆ = best `AUC (DoM)`)
