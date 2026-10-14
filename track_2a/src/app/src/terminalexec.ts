@@ -1,8 +1,8 @@
 //TODO: Headless CLI for the judges: `predict` and `results`. The TUI stays in app.tsx.
-import { pairScores } from "./funcs";
+import { ensureModel } from "./funcs";
 import { T_DIFF, T_GRU } from "./libraries/clit/analyze";
 import { words } from "./libraries/clit/dataset";
-import { pairScoresBothProgress } from "./libraries/progress/ffi";
+import { pairScoresBothProgress, pairScoresProgress, type HeadProgress } from "./libraries/progress/ffi";
 import { type Align, naturalWidths, padCell } from "./libraries/table";
 import swissgovJsonlPath from "./data/swissgov.jsonl" with { type: "file" };
 import predictionsJsonlPath from "./data/predictions.jsonl" with { type: "file" };
@@ -30,7 +30,6 @@ interface RowMeta {
   flagged_b: number;
 }
 
-// --- args -------------------------------------------------------------------
 function argValue(flag: string): string | undefined {
   const i = process.argv.indexOf(flag);
   return i >= 0 ? process.argv[i + 1] : undefined;
@@ -55,7 +54,6 @@ export function parseLangs(raw?: string): Lang[] {
   return picked.length > 0 ? picked : ALL_LANGS;
 }
 
-// --- jsonl ------------------------------------------------------------------
 function parseJsonl(text: string): Record<string, unknown>[] {
   const out: Record<string, unknown>[] = [];
   for (const raw of text.split("\n")) {
@@ -90,7 +88,6 @@ export async function readBundledResults(): Promise<ExecRow[]> {
   return parseJsonl(await Bun.file(predictionsJsonlPath).text()).map(toExecRow);
 }
 
-// --- scoring ----------------------------------------------------------------
 export interface ComputedRow {
   labels_a: number[];
   labels_b: number[];
@@ -101,7 +98,7 @@ function thresholds(lang: Lang): { tg: number; td: number } {
   return { tg: T_GRU[lang] ?? 0.1, td: T_DIFF[lang] ?? 0.22 };
 }
 
-export function computeRow(textA: string, textB: string, head: HeadArg, lang: Lang): ComputedRow {
+export function computeRow(textA: string, textB: string, head: HeadArg, lang: Lang, onSub?: HeadProgress): ComputedRow {
   const wcA = words(textA).length;
   const wcB = words(textB).length;
   const { tg, td } = thresholds(lang);
@@ -111,7 +108,7 @@ export function computeRow(textA: string, textB: string, head: HeadArg, lang: La
   let flaggedB = 0;
 
   if (head === "combined") {
-    const both = pairScoresBothProgress(textA, textB, wcA, wcB);
+    const both = pairScoresBothProgress(textA, textB, wcA, wcB, onSub);
     if (!both) throw new Error("pair_scores_both_ex failed");
     for (let i = 0; i < wcA; i++) {
       const g = both.gru.a[i] ?? 0;
@@ -126,7 +123,7 @@ export function computeRow(textA: string, textB: string, head: HeadArg, lang: La
       if (g > tg || d > td) flaggedB++;
     }
   } else {
-    const s = pairScores(textA, textB, head === "supervised" ? "gru" : "diffalign", wcA, wcB);
+    const s = pairScoresProgress(textA, textB, head === "supervised" ? "gru" : "diffalign", wcA, wcB, onSub);
     if (!s) throw new Error("pair_scores failed");
     const cut = head === "supervised" ? tg : td;
     for (let i = 0; i < wcA; i++) {
@@ -150,6 +147,7 @@ export async function predictRows(
   head: HeadArg,
   langs: Lang[],
   onDoc?: (done: number, total: number) => void,
+  onSub?: HeadProgress,
 ): Promise<{ predictions: ExecRow[]; metas: RowMeta[] }> {
   const selected = rows.filter((r) => langs.includes(langOf(r)));
   const predictions: ExecRow[] = [];
@@ -157,7 +155,7 @@ export async function predictRows(
   selected.forEach((row, i) => {
     const id = String(row["id"] ?? "");
     const lang = langOf(row);
-    const computed = computeRow(String(row["text_a"] ?? ""), String(row["text_b"] ?? ""), head, lang);
+    const computed = computeRow(String(row["text_a"] ?? ""), String(row["text_b"] ?? ""), head, lang, onSub);
     predictions.push({ id, text_a: String(row["text_a"] ?? ""), text_b: String(row["text_b"] ?? ""), labels_a: computed.labels_a, labels_b: computed.labels_b });
     metas.push({ ...computed.meta, id });
     onDoc?.(i + 1, selected.length);
@@ -165,7 +163,6 @@ export async function predictRows(
   return { predictions, metas };
 }
 
-// --- rendering --------------------------------------------------------------
 export function renderMarkdownTable(headers: string[], rows: string[][], aligns?: Align[]): string {
   const widths = naturalWidths(headers, rows);
   const align = aligns ?? headers.map(() => "left" as Align);
@@ -212,7 +209,63 @@ function outputPathOf(name: string): string {
   return `${name.replace(/\.[^./\\]*$/, "")}.jsonl`;
 }
 
-// --- entry point ------------------------------------------------------------
+interface Progress {
+  update: (done: number) => void;
+  sub: (phase: number, done: number, total: number) => void;
+  finish: () => void;
+}
+
+function makeProgress(label: string, total: number): Progress {
+  const tty = Boolean(process.stderr.isTTY);
+  const width = 24;
+  const t0 = Date.now();
+  let lastLogged = 0;
+  let done = 0;
+  let subFrac = 0;
+  let subPhase = 0;
+
+  const line = (): string => {
+    const now = Date.now();
+    const elapsed = (now - t0) / 1000;
+    const frac = total > 0 ? done / total : 1;
+    const pct = Math.round(frac * 100);
+    const eta = done > 0 ? (elapsed * (total - done)) / done : 0;
+    const filled = Math.round(frac * width);
+    const bar = tty ? ` [${"#".repeat(filled)}${"-".repeat(Math.max(0, width - filled))}]` : "";
+    const sub = subFrac > 0 && done < total ? ` · doc ${Math.round(subFrac * 100)}%${subPhase === 2 ? " (classifying)" : ""}` : "";
+    return `${label}${bar} ${done}/${total} ${pct}%${sub} · ${elapsed | 0}s eta ${eta | 0}s`;
+  };
+
+  const draw = (force: boolean): void => {
+    const now = Date.now();
+    if (tty) {
+      process.stderr.write(`\r${line()}`);
+    } else if (force || now - lastLogged >= 2000) {
+      lastLogged = now;
+      process.stderr.write(`${line()}\n`);
+    }
+  };
+
+  const update = (d: number): void => {
+    done = d;
+    subFrac = 0;
+    subPhase = 0;
+    draw(d === total);
+  };
+
+  const sub = (phase: number, d: number, t: number): void => {
+    subPhase = phase;
+    subFrac = t > 0 ? d / t : 0;
+    draw(false);
+  };
+
+  const finish = (): void => {
+    if (tty) process.stderr.write("\n");
+  };
+
+  return { update, sub, finish };
+}
+
 function log(message: string): void {
   process.stderr.write(`${message}\n`);
 }
@@ -233,11 +286,22 @@ export async function runTerminalExec(): Promise<void> {
   const input = argValue("--input");
   const rows = input ? parseJsonl(await Bun.file(input).text()) : await readBundledInput();
 
-  const startedAt = Date.now();
-  log(`predict: head=${head} lang=${langs.join(",")} docs=${rows.filter((r) => langs.includes(langOf(r))).length} input=${input ?? "bundled:data/swissgov.jsonl"}`);
-  const { predictions, metas } = await predictRows(rows, head, langs, (done, total) => {
-    if (done % 10 === 0 || done === total) log(`  ${done}/${total} (${(Date.now() - startedAt) / 1000 | 0}s)`);
-  });
+  const selected = rows.filter((r) => langs.includes(langOf(r))).length;
+  log(`predict: head=${head} lang=${langs.join(",")} docs=${selected} input=${input ?? "bundled:data/swissgov.jsonl"}`);
+
+  log("  loading engine (first run may be a little slow)");
+  ensureModel();
+
+  const bar = makeProgress("predict", selected);
+  bar.update(0);
+  const { predictions, metas } = await predictRows(
+    rows,
+    head,
+    langs,
+    (done) => bar.update(done),
+    (phase, done, total) => bar.sub(phase, done, total),
+  );
+  bar.finish();
 
   const outName = argValue("--output");
   if (outName) {

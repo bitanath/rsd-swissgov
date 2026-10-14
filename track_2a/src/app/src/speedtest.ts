@@ -27,15 +27,29 @@ interface Run {
   totalMs: number;
 }
 
-function run(prompt: string, maxTokens: number): Run {
+function log(message: string): void {
+  process.stderr.write(`${message}\n`);
+}
+
+const TICK_REQUEST_NS = 250_000_000; // ask for a tick at most every 250ms
+
+function run(prompt: string, maxTokens: number, onTick?: (generated: number, maxTokens: number) => void): Run {
   const t0 = Bun.nanoseconds();
   const handle = startStream({ prompt, maxTokens, temperature: 0 });
   const out = new Uint8Array(65536);
+  let lastTick = 0;
   try {
     for (;;) {
       const n = pollStream(handle, out);
       if (n === -2) throw new EngineFailed();
       if (n === -1) break;
+      if (n > 0 && onTick) {
+        const now = Bun.nanoseconds();
+        if (now - lastTick >= TICK_REQUEST_NS) {
+          lastTick = now;
+          onTick(streamTimings(handle).generated, maxTokens);
+        }
+      }
       if (n === 0) Bun.sleepSync(1); // idle: tiny sleep, well under one token interval
     }
     const totalMs = (Bun.nanoseconds() - t0) / 1e6;
@@ -45,17 +59,45 @@ function run(prompt: string, maxTokens: number): Run {
   }
 }
 
+//FIXME: Live decode counter: rewritten in place on a TTY, throttled to periodic lines when stderr is captured (docker logs, pipes, CI).
+function makeCounter(): { update: (generated: number, maxTokens: number) => void; finish: () => void } {
+  const tty = Boolean(process.stderr.isTTY);
+  const t0 = Date.now();
+  let lastLogged = 0;
+  const update = (generated: number, maxTokens: number): void => {
+    const now = Date.now();
+    if (!tty && now - lastLogged < 2000) return;
+    lastLogged = now;
+    const secs = Math.max((now - t0) / 1000, 1e-3);
+    const rate = generated / secs;
+    const text = `  decode ${generated}/${maxTokens} tok · ${rate.toFixed(1)} tok/s`;
+    if (tty) process.stderr.write(`\r${text}`);
+    else process.stderr.write(`${text}\n`);
+  };
+  const finish = (): void => {
+    if (tty) process.stderr.write("\n");
+  };
+  return { update, finish };
+}
+
 const rssMb = () => process.memoryUsage().rss / (1024 * 1024);
 
 export async function runSpeedtest(): Promise<void> {
+  log("speedtest: loading model + warmup (this is the long part)");
   const warmStart = Bun.nanoseconds();
   run("Hello", WARMUP_TOKENS); // warmup: model load (mmap) + page-in + allocations
   const warmupMs = (Bun.nanoseconds() - warmStart) / 1e6;
+  log(`speedtest: warmup done in ${warmupMs.toFixed(0)}ms (rss ${rssMb().toFixed(0)}MB)`);
 
+  log(`speedtest: prefill (prompt ${PREFILL_PROMPT.length} chars)…`);
   const pre = run(PREFILL_PROMPT, PREFILL_MAX_TOKENS);
   const prefill = pre.ttftMs > 0 ? pre.promptTokens / (pre.ttftMs / 1000) : 0;
+  log(`speedtest: prefill ${prefill.toFixed(1)} tok/s (prompt ${pre.promptTokens} tok, ttft ${pre.ttftMs.toFixed(1)}ms)`);
 
-  const dec = run(DECODE_PROMPT, DECODE_MAX_TOKENS);
+  log(`speedtest: decode up to ${DECODE_MAX_TOKENS} tokens…`);
+  const counter = makeCounter();
+  const dec = run(DECODE_PROMPT, DECODE_MAX_TOKENS, (generated, max) => counter.update(generated, max));
+  counter.finish();
   const decodeWindowMs = Math.max(dec.totalMs - dec.ttftMs, 1);
   const decode = dec.generated / (decodeWindowMs / 1000);
 
