@@ -1,0 +1,48 @@
+{
+  "probe": {
+    "dev": {
+      "de": {
+        "spearman": 0.489,
+        "kendall": 0.4
+      },
+      "fr": {
+        "spearman": 0.3632,
+        "kendall": 0.2961
+      },
+      "it": {
+        "spearman": 0.5557,
+        "kendall": 0.4549
+      }
+    },
+    "test": {
+      "de": {
+        "spearman": 0.4408,
+        "kendall": 0.3603
+      },
+      "fr": {
+        "spearman": 0.2721,
+        "kendall": 0.221
+      },
+      "it": {
+        "spearman": 0.4732,
+        "kendall": 0.3858
+      }
+    }
+  },
+  "_meta": {
+    "layers": [
+      14,
+      15,
+      16,
+      17
+    ],
+    "fusion": "sum",
+    "arch": "gru",
+    "tag": "devsel",
+    "splits": [
+      "dev",
+      "test"
+    ],
+    "harness": "nlpstats global correlate (matches evaluate_predictions_admin)"
+  }
+}

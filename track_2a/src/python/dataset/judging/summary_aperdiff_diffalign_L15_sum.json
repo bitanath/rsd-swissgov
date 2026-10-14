@@ -1,0 +1,45 @@
+{
+  "difffalign": {
+    "dev": {
+      "de": {
+        "spearman": 0.3323,
+        "kendall": 0.2678
+      },
+      "fr": {
+        "spearman": 0.2166,
+        "kendall": 0.1747
+      },
+      "it": {
+        "spearman": 0.3617,
+        "kendall": 0.2897
+      }
+    },
+    "test": {
+      "de": {
+        "spearman": 0.3219,
+        "kendall": 0.2598
+      },
+      "fr": {
+        "spearman": 0.182,
+        "kendall": 0.1469
+      },
+      "it": {
+        "spearman": 0.3604,
+        "kendall": 0.2896
+      }
+    }
+  },
+  "_meta": {
+    "layers": [
+      15
+    ],
+    "fusion": "sum",
+    "arch": "gru",
+    "tag": "devsel",
+    "splits": [
+      "dev",
+      "test"
+    ],
+    "harness": "nlpstats global correlate (matches evaluate_predictions_admin)"
+  }
+}

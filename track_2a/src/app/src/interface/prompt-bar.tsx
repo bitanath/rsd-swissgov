@@ -8,11 +8,13 @@ import { useTheme } from "../theme/use-theme";
 export function PromptBar({
   options,
   onSubmit,
+  onChange,
   focused = true,
   placeholder,
 }: {
   options: AutocompleteOption[];
   onSubmit: (text: string) => void;
+  onChange?: (text: string) => void;
   focused?: boolean;
   placeholder?: string;
 }) {
@@ -41,11 +43,13 @@ export function PromptBar({
       buffer.setCursorByOffset(text.length);
     }
     setInputText(text);
+    onChange?.(text);
   };
 
   const clear = () => {
     inputRef.current?.editBuffer.setText("");
     setInputText("");
+    onChange?.("");
     setAcDismissed(false);
   };
 
@@ -111,7 +115,9 @@ export function PromptBar({
           onSubmit={submit}
           onKeyDown={handleKey}
           onContentChange={() => {
-            setInputText(inputRef.current?.editBuffer.getText() ?? "");
+            const text = inputRef.current?.editBuffer.getText() ?? "";
+            setInputText(text);
+            onChange?.(text);
             setAcDismissed(false);
           }}
           textColor={theme.colors.foreground}

@@ -160,6 +160,8 @@ def main():
     ap.add_argument("--calib-frac", type=float, default=0.3, help="fraction of pairs used to estimate d")
     ap.add_argument("--layers", default="all", help="'all' or comma-separated indices")
     ap.add_argument("--outdir", default=str(REPO / "python"))
+    ap.add_argument("--out", default="ablation.json",
+                    help="output filename under --outdir (use a new name to avoid overwriting)")
     args = ap.parse_args()
 
     n_layers = 32
@@ -300,10 +302,10 @@ def main():
     print(f"best layer by Spearman: {best['layer']} ({best['name']})  rho={best['spearman']:.4f}", flush=True)
 
     outdir = Path(args.outdir)
-    (outdir / "ablation.json").write_text(json.dumps(
+    (outdir / args.out).write_text(json.dumps(
         dict(layers=results, best=best["layer"], split=args.split, limit=args.limit,
              calib=len(calib), eval=len(evalset)), indent=2))
-    print(f"wrote {outdir/'ablation.json'}  (table also printed above)")
+    print(f"wrote {outdir/args.out}  (table also printed above)")
 
 
 if __name__ == "__main__":

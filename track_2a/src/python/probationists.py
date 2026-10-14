@@ -367,7 +367,9 @@ def main():
         elif a == "--dead-after" and nxt: dead_after = int(nxt)
         elif a == "--dead-below" and nxt: dead_below = float(nxt)
         elif a == "--val-frac" and nxt: val_frac = float(nxt)
+        elif a.startswith("--val-frac="): val_frac = float(a.split("=", 1)[1])
         elif a == "--tag" and nxt: save_tag = nxt
+        elif a.startswith("--tag="): save_tag = a.split("=", 1)[1]
     assert objective in ("bce", "focal", "pair", "bce+pair"), f"bad objective {objective}"
     loss_fn = make_loss(objective)
     d_in = DIM * len(layers) if fusion == "concat" else DIM

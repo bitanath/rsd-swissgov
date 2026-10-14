@@ -139,61 +139,81 @@ German  text ──Apertus (frozen)──► per-token vectors  (n_DE, 4096)
 
 ## Current results
 
+SwissGov-RSD **test** split (56/lang), official judging metric (global Spearman
+×100, gold `-1` dropped).
+
 | method                                                  | EN–DE      | EN–FR      | EN–IT      |
 |---------------------------------------------------------|--:---------|--:---------|--:---------|
 | DiffAlign · Apertus L15 (unsupervised)                  | 32.2       | 18.2       | 36.0       |
 | DiffAlign · Apertus L14–17 sum (unsupervised)           | 31.5       | 18.4       | 36.6       |
-| **Pair probe · GRU (frozen Apertus L14–17, in-domain)** | **46.2**   | **27.3**   | **50.1**   |
+| **Pair probe · GRU (frozen Apertus L14–17, dev-selected)** | **44.1** | **27.2** | **47.3** |
 | Human annotator agreement (ceiling)                     | 56.1       | 43.6       | 65.1       |
-| _OOD · synthetic target↔target_                         | 21.7 de-fr | 19.2 de-it | 15.1 fr-it |
 
 
-*Values are token-level Spearman ×100, pooled over both texts. Pair probe = **bidirectional GRU** (final arch), single seed, best val epoch (ep5). Arch sweep (val macro / OOD macro, best-epoch): **GRU 41.2 / 18.7**, CNN 41.0 / 18.2, MLP 39.3 / 19.1, transformer 39.1 / 19.1, xattn 38.9 / 20.0, bilinear 39.2 / 17.4 — **GRU** chosen (best in-domain macro, best DE/IT; OOD within noise of CNN); FR is the only arch-sensitive language and is annotation-limited. Last row's columns are the target↔target pairs **de-fr / de-it / fr-it**, not EN–XX. DiffAlign L14–17 fusion does **not** beat L15 (mean 28.84 vs 28.81).*
+*Values are token-level Spearman ×100, pooled over both texts, **test** split.
+The probe is a **bidirectional GRU** (final arch), single seed, best **dev** epoch
+(ep5); trained and early-stopped on `dev` only — `test` is never used for
+selection. An earlier `46.2 / 27.3 / 50.1` run selected on the test split and is
+superseded (the ~+2 gap was that optimism).*
+
+*Architecture (dev-selected, single seed). A 1-epoch dev screen (ep0 macro) —
+**CNN 0.3624**, GRU 0.3506, bilinear 0.3438, MLP 0.3360, transformer 0.3343,
+xattn 0.1631 — flagged CNN as the only close contender, so it was run to
+completion: CNN peaks at **0.38322** (ep4) vs GRU **0.38323** (ep5) — a **tie**
+(GRU ahead on IT 0.448 vs 0.444 and FR 0.265 vs 0.263; CNN ahead on DE 0.443 vs
+0.437). GRU is **retained**. FR is annotation-limited (ceiling 43.6). DiffAlign
+L14–17 fusion does **not** beat L15 on SwissGov (28.8 vs 28.8). The synthetic
+target↔target OOD table is **exploratory only** (built from the test split) and is
+excluded from judged claims.*
 
 
 
 ## Ablation table for intermediate Layers compared against Human Agreement
 
-Run: `python ablation.py --split full --limit 15 --calib-frac 0.35`
-(45 pairs; ★ = best `Spearman ρ (OLS)`, ◆ = best `AUC (DoM)`)
+Run (dev-selected): `python ablation.py --split val --limit 20 --calib-frac 0.35 --out ablation_devsel.json`
+(60 pairs: 21 calib / 39 eval; ★ = best `Spearman ρ (OLS)`, ◆ = best `AUC (DoM)`).
+Never touches the test split.
 
-**Result:** the signal is strongest at **layer 15** (ρ = 0.289, AUC = 0.754) — the top of the
-*Semantic build-up* band — and plateaus across roughly **layers 13–17**. 
+**Result:** the signal is strongest at **layer 15** (ρ = **0.2318**, AUC = 0.7612)
+— the top of the *Semantic build-up* band — with AUC peaking one layer earlier at
+**layer 14** (0.7664); the plateau spans roughly **layers 14–17**, confirming the
+L14–17 probe band from `dev` alone. (Numbers are lower than the earlier
+`--split full` run because that run included the test split; those are superseded.)
 
 | Layer  | Heuristic name            | Spearman ρ (OLS) | Pearson r (OLS) | ρ (DoM) | AUC (DoM) | Sep   | ρ de   | ρ fr   | ρ it   | n     |
 |--:-----|---------------------------|--:---------------|--:--------------|--:------|--:--------|--:----|--:-----|--:-----|--:-----|--:----|
-| 0      | Surface & orthography     | 0.1046           | 0.1126          | 0.0837  | 0.6034    | 0.345 | 0.0594 | 0.1006 | 0.0786 | 26116 |
-| 1      | Surface & orthography     | 0.0928           | 0.1097          | 0.0639  | 0.5925    | 0.313 | 0.0468 | 0.0942 | 0.0660 | 26116 |
-| 2      | Surface & orthography     | 0.0779           | 0.0989          | 0.0362  | 0.5740    | 0.256 | 0.0345 | 0.0914 | 0.0523 | 26116 |
-| 3      | Surface & orthography     | 0.0647           | 0.0862          | 0.0265  | 0.5667    | 0.231 | 0.0249 | 0.0758 | 0.0450 | 26116 |
-| 4      | Local syntax / morphology | 0.0527           | 0.0745          | 0.0204  | 0.5638    | 0.218 | 0.0165 | 0.0666 | 0.0338 | 26116 |
-| 5      | Local syntax / morphology | 0.0794           | 0.1001          | 0.0310  | 0.5745    | 0.256 | 0.0418 | 0.0788 | 0.0787 | 26116 |
-| 6      | Local syntax / morphology | 0.0626           | 0.0785          | 0.0247  | 0.5684    | 0.235 | 0.0394 | 0.0697 | 0.0577 | 26116 |
-| 7      | Local syntax / morphology | 0.0744           | 0.0952          | 0.0368  | 0.5813    | 0.276 | 0.0521 | 0.0778 | 0.0790 | 26116 |
-| 8      | Local syntax / morphology | 0.1069           | 0.1338          | 0.0610  | 0.6043    | 0.354 | 0.0930 | 0.1019 | 0.1238 | 26116 |
-| 9      | Local syntax / morphology | 0.1909           | 0.2157          | 0.1245  | 0.6614    | 0.551 | 0.1655 | 0.1803 | 0.2233 | 26116 |
-| 10     | Semantic build-up         | 0.1929           | 0.2184          | 0.1183  | 0.6557    | 0.534 | 0.1638 | 0.1806 | 0.2256 | 26116 |
-| 11     | Semantic build-up         | 0.2305           | 0.2619          | 0.1477  | 0.6830    | 0.629 | 0.1995 | 0.2179 | 0.2645 | 26116 |
-| 12     | Semantic build-up         | 0.2291           | 0.2704          | 0.1396  | 0.6765    | 0.602 | 0.2041 | 0.2255 | 0.2560 | 26116 |
-| 13     | Semantic build-up         | 0.2632           | 0.3068          | 0.1937  | 0.7226    | 0.770 | 0.2304 | 0.2621 | 0.2947 | 26116 |
-| 14     | Semantic build-up         | 0.2661           | 0.3101          | 0.2064  | 0.7304    | 0.808 | 0.2304 | 0.2731 | 0.2929 | 26116 |
-| 15 ★ ◆ | Semantic build-up         | 0.2886           | 0.3654          | 0.2359  | 0.7539    | 0.918 | 0.2573 | 0.2961 | 0.3050 | 26116 |
-| 16     | Mid-depth semantic core   | 0.2700           | 0.3386          | 0.2177  | 0.7384    | 0.843 | 0.2422 | 0.2846 | 0.2839 | 26116 |
-| 17     | Cross-lingual semantics   | 0.2765           | 0.3394          | 0.2301  | 0.7460    | 0.880 | 0.2458 | 0.2793 | 0.2842 | 26116 |
-| 18     | Cross-lingual semantics   | 0.2546           | 0.3135          | 0.2179  | 0.7355    | 0.845 | 0.2278 | 0.2658 | 0.2506 | 26116 |
-| 19     | Cross-lingual semantics   | 0.2612           | 0.3164          | 0.2240  | 0.7386    | 0.861 | 0.2380 | 0.2656 | 0.2603 | 26116 |
-| 20     | Cross-lingual semantics   | 0.2528           | 0.3138          | 0.2157  | 0.7347    | 0.845 | 0.2301 | 0.2592 | 0.2455 | 26116 |
-| 21     | Cross-lingual semantics   | 0.2519           | 0.3134          | 0.1972  | 0.7211    | 0.787 | 0.2265 | 0.2501 | 0.2473 | 26116 |
-| 22     | Task & discourse          | 0.2232           | 0.2730          | 0.2099  | 0.7264    | 0.823 | 0.1991 | 0.2356 | 0.2083 | 26116 |
-| 23     | Task & discourse          | 0.2241           | 0.2695          | 0.2080  | 0.7225    | 0.816 | 0.1998 | 0.2258 | 0.2069 | 26116 |
-| 24     | Task & discourse          | 0.2094           | 0.2498          | 0.1917  | 0.7085    | 0.763 | 0.1837 | 0.2117 | 0.1770 | 26116 |
-| 25     | Task & discourse          | 0.2101           | 0.2555          | 0.1760  | 0.6982    | 0.718 | 0.1810 | 0.2127 | 0.1742 | 26116 |
-| 26     | Task & discourse          | 0.1957           | 0.2330          | 0.1589  | 0.6797    | 0.655 | 0.1632 | 0.2012 | 0.1458 | 26116 |
-| 27     | Task & discourse          | 0.1805           | 0.2090          | 0.1567  | 0.6700    | 0.627 | 0.1280 | 0.1935 | 0.1360 | 26116 |
-| 28     | Task & discourse          | 0.1803           | 0.2061          | 0.1549  | 0.6690    | 0.619 | 0.1290 | 0.1982 | 0.1383 | 26116 |
-| 29     | Task & discourse          | 0.1786           | 0.2049          | 0.1493  | 0.6636    | 0.600 | 0.1374 | 0.1975 | 0.1354 | 26116 |
-| 30     | Output formation          | 0.1794           | 0.1970          | 0.1565  | 0.6676    | 0.602 | 0.1457 | 0.2038 | 0.1280 | 26116 |
-| 31     | Output formation          | 0.1038           | 0.1317          | 0.0664  | 0.5833    | 0.326 | 0.0548 | 0.1112 | 0.0469 | 26116 |
+| 0      | Surface & orthography     | 0.0891           | 0.0951          | 0.0860  | 0.5906    | 0.313 | 0.0662 | 0.0931 | 0.0714 | 26630 |
+| 1      | Surface & orthography     | 0.0755           | 0.0884          | 0.0694  | 0.5840    | 0.294 | 0.0516 | 0.0615 | 0.0759 | 26630 |
+| 2      | Surface & orthography     | 0.0612           | 0.0738          | 0.0575  | 0.5759    | 0.256 | 0.0289 | 0.0587 | 0.0634 | 26630 |
+| 3      | Surface & orthography     | 0.0646           | 0.0813          | 0.0608  | 0.5806    | 0.287 | 0.0328 | 0.0698 | 0.0600 | 26630 |
+| 4      | Local syntax / morphology | 0.0665           | 0.0838          | 0.0783  | 0.5949    | 0.341 | 0.0442 | 0.0865 | 0.0480 | 26630 |
+| 5      | Local syntax / morphology | 0.0915           | 0.1069          | 0.0982  | 0.6175    | 0.417 | 0.0811 | 0.0956 | 0.0763 | 26630 |
+| 6      | Local syntax / morphology | 0.0982           | 0.1237          | 0.0993  | 0.6245    | 0.451 | 0.0857 | 0.0990 | 0.0880 | 26630 |
+| 7      | Local syntax / morphology | 0.1288           | 0.1705          | 0.1357  | 0.6627    | 0.599 | 0.1109 | 0.1211 | 0.1351 | 26630 |
+| 8      | Local syntax / morphology | 0.1661           | 0.2231          | 0.1674  | 0.6962    | 0.727 | 0.1363 | 0.1474 | 0.1954 | 26630 |
+| 9      | Local syntax / morphology | 0.1990           | 0.2458          | 0.2117  | 0.7334    | 0.844 | 0.1643 | 0.1838 | 0.2290 | 26630 |
+| 10     | Semantic build-up         | 0.2107           | 0.2880          | 0.2239  | 0.7495    | 0.972 | 0.1679 | 0.1880 | 0.2476 | 26630 |
+| 11     | Semantic build-up         | 0.2129           | 0.3034          | 0.2284  | 0.7506    | 1.019 | 0.1633 | 0.1890 | 0.2556 | 26630 |
+| 12     | Semantic build-up         | 0.2136           | 0.3441          | 0.2293  | 0.7521    | 1.132 | 0.1694 | 0.1919 | 0.2497 | 26630 |
+| 13     | Semantic build-up         | 0.2157           | 0.3325          | 0.2368  | 0.7528    | 1.111 | 0.1645 | 0.2033 | 0.2512 | 26630 |
+| 14 ◆   | Semantic build-up         | 0.2317           | 0.3498          | 0.2571  | 0.7664    | 1.181 | 0.1860 | 0.2254 | 0.2582 | 26630 |
+| 15 ★   | Semantic build-up         | 0.2318           | 0.3688          | 0.2548  | 0.7612    | 1.206 | 0.1939 | 0.2279 | 0.2497 | 26630 |
+| 16     | Mid-depth semantic core   | 0.2075           | 0.3284          | 0.2338  | 0.7398    | 1.094 | 0.1745 | 0.2133 | 0.2144 | 26630 |
+| 17     | Cross-lingual semantics   | 0.2103           | 0.3262          | 0.2374  | 0.7386    | 1.083 | 0.1702 | 0.2156 | 0.2169 | 26630 |
+| 18     | Cross-lingual semantics   | 0.1968           | 0.2973          | 0.2252  | 0.7235    | 1.006 | 0.1603 | 0.2122 | 0.1933 | 26630 |
+| 19     | Cross-lingual semantics   | 0.2068           | 0.2980          | 0.2328  | 0.7296    | 1.001 | 0.1692 | 0.2190 | 0.2079 | 26630 |
+| 20     | Cross-lingual semantics   | 0.1949           | 0.2871          | 0.2237  | 0.7220    | 0.987 | 0.1613 | 0.2044 | 0.1940 | 26630 |
+| 21     | Cross-lingual semantics   | 0.1969           | 0.2864          | 0.2284  | 0.7302    | 1.006 | 0.1661 | 0.2027 | 0.1964 | 26630 |
+| 22     | Task & discourse          | 0.1700           | 0.2264          | 0.1934  | 0.6883    | 0.769 | 0.1479 | 0.1815 | 0.1601 | 26630 |
+| 23     | Task & discourse          | 0.1694           | 0.2202          | 0.1882  | 0.6843    | 0.739 | 0.1497 | 0.1743 | 0.1610 | 26630 |
+| 24     | Task & discourse          | 0.1582           | 0.2000          | 0.1757  | 0.6735    | 0.684 | 0.1386 | 0.1632 | 0.1448 | 26630 |
+| 25     | Task & discourse          | 0.1633           | 0.2152          | 0.1823  | 0.6839    | 0.751 | 0.1424 | 0.1676 | 0.1476 | 26630 |
+| 26     | Task & discourse          | 0.1600           | 0.2214          | 0.1755  | 0.6834    | 0.762 | 0.1441 | 0.1608 | 0.1413 | 26630 |
+| 27     | Task & discourse          | 0.1487           | 0.2101          | 0.1598  | 0.6687    | 0.693 | 0.1347 | 0.1581 | 0.1298 | 26630 |
+| 28     | Task & discourse          | 0.1449           | 0.1986          | 0.1558  | 0.6626    | 0.663 | 0.1339 | 0.1605 | 0.1248 | 26630 |
+| 29     | Task & discourse          | 0.1323           | 0.1726          | 0.1400  | 0.6460    | 0.578 | 0.1188 | 0.1486 | 0.1115 | 26630 |
+| 30     | Output formation          | 0.1301           | 0.1718          | 0.1364  | 0.6434    | 0.567 | 0.1184 | 0.1533 | 0.1128 | 26630 |
+| 31     | Output formation          | 0.0724           | 0.0986          | 0.0724  | 0.5890    | 0.331 | 0.0594 | 0.0586 | 0.0592 | 26630 |
 
 
 ## How to read it

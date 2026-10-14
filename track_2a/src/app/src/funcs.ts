@@ -19,6 +19,10 @@ const { symbols } = dlopen(libPath, {
   stream_prompt_tokens: { args: ["ptr"], returns: "usize" },
   stream_ttft_nanoseconds: { args: ["ptr"], returns: "u64" },
   free_string: { args: ["ptr"], returns: "void" },
+  pair_scores: {
+    args: ["ptr", "cstring", "cstring", "i32", "ptr", "usize", "ptr", "usize"],
+    returns: "i32",
+  },
 });
 
 export const LIB_PATH = libPath;
@@ -47,6 +51,7 @@ export interface GenerateOptions {
 export interface StreamOptions extends GenerateOptions {
   onChunk: (text: string) => void;
   isCancelled?: () => boolean;
+  onProgress?: (generated: number, max: number) => void;
 }
 
 export interface StreamResult {
@@ -92,7 +97,7 @@ function paramsOf(opts: GenerateOptions) {
 
 let model: Pointer | null = null;
 
-function ensureModel(): Pointer {
+export function ensureModel(): Pointer {
   if (model === null) {
     const systemZ = encodeString(DEFAULT_SYSTEM);
     model = symbols.model_create_ex(systemZ, CHAT_MAX_TOKENS, DEFAULT_TEMPERATURE, DEFAULT_TOP_P, DEFAULT_TOP_K) as Pointer | null;
@@ -145,6 +150,46 @@ export function streamTimings(handle: Pointer): { generated: number; promptToken
   };
 }
 
+export type PairHead = "gru" | "diffalign";
+
+export interface PairScores {
+  a: Float32Array;
+  b: Float32Array;
+}
+
+/**
+ * Run one RSD head over a single document pair. The heavy lifting (L14-17
+ * capture, word pooling, GRU/DiffAlign) happens in the Zig core; this just hands
+ * over the two texts and receives one f32 per whitespace word per side.
+ */
+export function pairScores(
+  textA: string,
+  textB: string,
+  head: PairHead,
+  wordCountA: number,
+  wordCountB: number,
+): PairScores | null {
+  const handle = ensureModel();
+  const outA = new Float32Array(wordCountA);
+  const outB = new Float32Array(wordCountB);
+  const za = encodeString(textA);
+  const zb = encodeString(textB);
+  const rc = symbols.pair_scores(
+    handle,
+    za,
+    zb,
+    head === "diffalign" ? 1 : 0,
+    ptr(outA),
+    wordCountA,
+    ptr(outB),
+    wordCountB,
+  ) as number;
+  void za;
+  void zb;
+  if (rc !== 0) return null;
+  return { a: outA, b: outB };
+}
+
 export function freeModel(): void {
   if (model !== null) {
     symbols.model_free(model);
@@ -187,6 +232,7 @@ export async function streamGenerate(opts: StreamOptions): Promise<StreamResult>
       if (n > 0) {
         text += decoder.decode(out.subarray(0, n), { stream: true });
         opts.onChunk(text);
+        opts.onProgress?.(Number(symbols.stream_generated_tokens(handle)), opts.maxTokens ?? DEFAULT_MAX_TOKENS);
       } else if (n === -1) {
         break;
       } else {

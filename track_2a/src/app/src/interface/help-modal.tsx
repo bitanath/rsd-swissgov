@@ -3,12 +3,18 @@ import { COMMANDS } from "../libraries/commands";
 import { useTheme } from "../theme/use-theme";
 
 const KEYS: [string, string][] = [
-  ["ctrl+t", "theme chooser"],
-  ["ctrl+r", "re-render the diff"],
-  ["mouse drag", "select text · auto-copies"],
-  ["enter", "run the highlighted command"],
+  ["ctrl+r", "/gru — layerwise + GRU probe + English note"],
+  ["ctrl+k", "/diffalign — layerwise + DiffAlign head"],
+  ["ctrl+e", "/highlights — toggle the highlight display layer"],
+  ["ctrl+g", "/groundtruth — highlight the gold labels (data source)"],
+  ["ctrl+p", "/help — this modal"],
+  ["ctrl+t", "/theme — theme chooser"],
+  ["up / down", "move the sidebar cursor through headers and docs"],
+  ["left / right", "collapse / expand the row under the cursor"],
+  ["space / enter", "expand a group · open the highlighted document"],
+  ["mouse", "click a header to collapse/expand · a doc to open"],
   ["esc", "close this modal"],
-  ["ctrl+c", "quit"],
+  ["ctrl+c", "/quit — exit aperdiff"],
 ];
 
 function Row({
@@ -57,7 +63,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
           <Row
             key={command.name}
             label={`/${command.name}`}
-            text={command.description}
+            text={command.keys ? `${command.description}   (${command.keys})` : command.description}
             labelColor={theme.colors.accent}
             textColor={theme.colors.mutedForeground}
           />

@@ -1,4 +1,6 @@
 // Ported from termcn `opentui/alert`.
+import type { ReactNode } from "react";
+
 import { useTheme } from "../theme/use-theme";
 import type { BorderStyle } from "../theme/types";
 
@@ -16,6 +18,8 @@ export interface AlertProps {
   title?: string;
   message?: string;
   appendix?: string;
+  /** Arbitrary row(s) rendered under the title (e.g. a spinner). */
+  children?: ReactNode;
   icon?: string;
   bordered?: boolean;
   borderStyle?: BorderStyle;
@@ -29,6 +33,7 @@ export const Alert = ({
   title,
   message,
   appendix,
+  children,
   icon,
   bordered = true,
   borderStyle,
@@ -67,6 +72,7 @@ export const Alert = ({
           </text>
         )}
       </box>
+      {children}
       {message && <text wrapMode="none" flexShrink={0}>{message}</text>}
       {appendix && <text fg={theme.colors.mutedForeground} wrapMode="none" flexShrink={0}>{appendix}</text>}
     </>
