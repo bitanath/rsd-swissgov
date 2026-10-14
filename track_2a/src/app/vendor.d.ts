@@ -3,6 +3,11 @@ declare module "*.bin" {
   export default path;
 }
 
+declare module "*.jsonl" {
+  const path: string;
+  export default path;
+}
+
 declare module "*.dylib" {
   const path: string;
   export default path;
