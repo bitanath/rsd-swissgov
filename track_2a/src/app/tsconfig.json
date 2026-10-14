@@ -15,7 +15,7 @@
     "noEmit": true,
 
     "paths": {
-      "@lib/*": ["./src/libraries/*"],
+      "@lib/*": ["./src/libraries/clit/*"],
       "@interface/*": ["./src/interface/*"],
       "@hunk/vcs/source": ["./src/libraries/hunk/vendor/hunk-vcs-source.ts"]
     },

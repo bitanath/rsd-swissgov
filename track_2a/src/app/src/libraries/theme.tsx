@@ -11,7 +11,11 @@ import { resolveTheme, type AppTheme } from "./hunk/ui/themes";
 const CONFIG_DIR = join(homedir(), ".aperdiff");
 const THEME_FILE = join(CONFIG_DIR, "hunk-theme.json");
 
-export const DEFAULT_HUNK_THEME: HunkDiffThemeName = "github-dark-default";
+export const DEFAULT_HUNK_THEME: HunkDiffThemeName = "aurora-x";
+
+export const SELECTABLE_THEMES = HUNK_DIFF_THEME_NAMES.filter(
+  (id) => id.startsWith("github-") || id.startsWith("catppuccin-") || id.startsWith("vitesse-"),
+);
 
 export function isHunkThemeName(name: string | null | undefined): name is HunkDiffThemeName {
   return Boolean(name) && (HUNK_DIFF_THEME_NAMES as readonly string[]).includes(name as string);
@@ -102,9 +106,9 @@ export function HunkThemeProvider({
       },
       cycleTheme: () =>
         setName((current) => {
-          const index = HUNK_DIFF_THEME_NAMES.indexOf(current);
+          const index = SELECTABLE_THEMES.indexOf(current);
           const next =
-            HUNK_DIFF_THEME_NAMES[(index + 1) % HUNK_DIFF_THEME_NAMES.length] ?? DEFAULT_HUNK_THEME;
+            SELECTABLE_THEMES[(index + 1) % SELECTABLE_THEMES.length] ?? DEFAULT_HUNK_THEME;
           saveHunkThemeName(next);
           return next;
         }),

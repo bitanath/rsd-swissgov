@@ -1,4 +1,4 @@
-import { buildCliFile } from "./src/libraries/cli";
+import { buildCliFile } from "./src/libraries/clit/cli";
 import { runSmoke, smokeRequested } from "./src/smoke";
 import { runSpeedtest, speedtestRequested } from "./src/speedtest";
 

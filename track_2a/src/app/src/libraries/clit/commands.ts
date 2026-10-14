@@ -1,15 +1,15 @@
-export type LayoutMode = "split" | "unified";
+import { HEAD_LABEL } from "./analyze";
+
 export type ToastVariant = "success" | "error" | "warning" | "info";
 export type ModalKind = "help" | "theme";
 
 export interface CommandContext {
-  layout: LayoutMode;
-  setLayout: (mode: LayoutMode) => void;
   quit: () => void;
   openModal: (modal: ModalKind) => void;
   toast: (message: string, variant?: ToastVariant) => void;
   runGru: () => void;
   runDiffalign: () => void;
+  runCombined: () => void;
   toggleHighlights: () => void;
   toggleGold: () => void;
 }
@@ -22,15 +22,14 @@ export interface CommandDef {
 }
 
 export const COMMANDS: CommandDef[] = [
-  { name: "gru", label: "gru", description: "layerwise + GRU probe + English note", keys: "ctrl+r" },
-  { name: "diffalign", label: "diffalign", description: "layerwise + DiffAlign head", keys: "ctrl+k" },
+  { name: "supervisedalign", label: HEAD_LABEL.gru, description: "layerwise + pairprobe (supervised) + English note", keys: "ctrl+r" },
+  { name: "diffalign", label: HEAD_LABEL.diffalign, description: "layerwise + diffalign (unsupervised) head + English note", keys: "ctrl+k" },
+  { name: "combined", label: HEAD_LABEL.combined, description: "both heads: union of differences + grounded note", keys: "ctrl+d" },
   { name: "highlights", label: "highlights", description: "toggle the highlight display layer", keys: "ctrl+e" },
   { name: "groundtruth", label: "groundtruth", description: "highlight the gold labels (data source)", keys: "ctrl+g" },
   { name: "theme", label: "theme", description: "open the theme chooser", keys: "ctrl+t" },
   { name: "help", label: "help", description: "list commands and shortcut keys", keys: "ctrl+p" },
   { name: "quit", label: "quit", description: "exit aperdiff", keys: "ctrl+c" },
-  { name: "split", label: "split", description: "side-by-side layout" },
-  { name: "unified", label: "unified", description: "stacked unified layout" },
 ];
 
 export function runCommand(input: string, ctx: CommandContext): void {
@@ -43,11 +42,15 @@ export function runCommand(input: string, ctx: CommandContext): void {
   const arg = rest.join(" ");
 
   switch (name) {
+    case "supervisedalign":
     case "gru":
       ctx.runGru();
       return;
     case "diffalign":
       ctx.runDiffalign();
+      return;
+    case "combined":
+      ctx.runCombined();
       return;
     case "highlights":
       ctx.toggleHighlights();
@@ -55,14 +58,6 @@ export function runCommand(input: string, ctx: CommandContext): void {
     case "groundtruth":
     case "gold":
       ctx.toggleGold();
-      return;
-    case "split":
-      ctx.setLayout("split");
-      ctx.toast("layout: split", "success");
-      return;
-    case "unified":
-      ctx.setLayout("unified");
-      ctx.toast("layout: unified", "success");
       return;
     case "theme":
       ctx.openModal("theme");

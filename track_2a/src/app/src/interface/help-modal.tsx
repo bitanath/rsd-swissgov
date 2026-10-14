@@ -1,16 +1,16 @@
 import { Modal } from "../components/modal";
-import { COMMANDS } from "../libraries/commands";
+import { COMMANDS } from "../libraries/clit/commands";
 import { useTheme } from "../theme/use-theme";
 
 const KEYS: [string, string][] = [
-  ["ctrl+r", "/gru — layerwise + GRU probe + English note"],
-  ["ctrl+k", "/diffalign — layerwise + DiffAlign head"],
+  ["ctrl+r", "/supervisedalign — layerwise + pairprobe (supervised) + English note"],
+  ["ctrl+k", "/diffalign — layerwise + diffalign (unsupervised) head"],
+  ["ctrl+d", "/combined — both heads: union of differences + grounded note"],
   ["ctrl+e", "/highlights — toggle the highlight display layer"],
   ["ctrl+g", "/groundtruth — highlight the gold labels (data source)"],
   ["ctrl+p", "/help — this modal"],
   ["ctrl+t", "/theme — theme chooser"],
   ["up / down", "move the sidebar cursor through headers and docs"],
-  ["left / right", "collapse / expand the row under the cursor"],
   ["space / enter", "expand a group · open the highlighted document"],
   ["mouse", "click a header to collapse/expand · a doc to open"],
   ["esc", "close this modal"],

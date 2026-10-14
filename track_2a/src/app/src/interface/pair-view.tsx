@@ -1,8 +1,7 @@
 import { Alert } from "../components/alert";
 import type { AppTheme } from "../libraries/hunk/ui/themes";
-import { words, type Doc } from "../libraries/dataset";
-import type { PairScores } from "../funcs";
-import type { Head, Signal } from "../libraries/analyze";
+import { words, type Doc } from "../libraries/clit/dataset";
+import { HEAD_LABEL, headMask, PROV_GRU, type Combined, type Head, type Signal } from "../libraries/clit/analyze";
 
 interface Word {
   text: string;
@@ -11,9 +10,7 @@ interface Word {
 
 type HighlightMode = "gold" | "score"; //HACK: We either show the ground truth or the model scored values, no in-betweeners
 
-const SCORE_FLOOR = 0.2;
-const SCORE_PEAK_RATIO = 0.6;
-const LINE_HEAT_RATIO = 0.5;
+const LINE_HEAT_RATIO = 0.15;
 
 const AGENT_ICON = "🤖";
 const AGENT_ICON_FALLBACK = "✏️";
@@ -75,6 +72,9 @@ function Column({
   label,
   tokens,
   values,
+  prov,
+  mask = 3,
+  palette = "provenance",
   show,
   mode,
   threshold,
@@ -85,6 +85,9 @@ function Column({
   label: string;
   tokens: string[];
   values: ArrayLike<number> | null;
+  prov?: Uint8Array | null;
+  mask?: number;
+  palette?: "provenance" | "gru" | "diff";
   show: boolean;
   mode: HighlightMode;
   threshold: number;
@@ -98,7 +101,24 @@ function Column({
 
   
   const wordStyle = (idx: number): { bg: string | null; intensity: number } => {
-    if (!show || !values) return { bg: null, intensity: 0 };
+    if (!show) return { bg: null, intensity: 0 };
+    if (prov) {
+      const p = (prov[idx] ?? 0) & mask;
+      if (!p) return { bg: null, intensity: 0 };
+      //FIXME: provenance colours are a rough legend: gru = amber, diff = blue, both = red.
+      const tint =
+        palette === "provenance"
+          ? p === 3
+            ? theme.removedSignColor
+            : p === PROV_GRU
+              ? theme.addedSignColor
+              : theme.fileModified
+          : palette === "gru"
+            ? theme.addedSignColor
+            : theme.fileModified;
+      return { bg: heatColor(theme, 0.85, tint), intensity: 1 };
+    }
+    if (!values) return { bg: null, intensity: 0 };
     const value = values[idx] ?? 0;
     if (!(value > threshold)) return { bg: null, intensity: 0 };
     const intensity = 0.45 + 0.55 * Math.min(1, (value - threshold) / span); //HACK: per word heatmap intensity (if it counts as a mismatch) and 0..1 intensity.
@@ -135,7 +155,7 @@ export function PairView({
   doc,
   width,
   theme,
-  scores,
+  combined,
   head,
   signal,
   showHighlights,
@@ -144,7 +164,7 @@ export function PairView({
   doc: Doc;
   width: number;
   theme: AppTheme;
-  scores: PairScores | null;
+  combined?: Combined | null;
   head: Head | null;
   signal: Signal | null;
   showHighlights: boolean;
@@ -154,31 +174,48 @@ export function PairView({
   const a = words(doc.text_a);
   const b = words(doc.text_b);
 
-  const scorePeak = Math.max(maxOf(scores?.a), maxOf(scores?.b));
-  const scoreThreshold = Math.max(SCORE_FLOOR, SCORE_PEAK_RATIO * scorePeak);
+  const model = !showGold && combined != null && head != null;
+  const mask = headMask(head);
+  const palette = head === "combined" ? "provenance" : head === "gru" ? "gru" : "diff";
   const goldPeak = Math.max(1, maxOf(doc.labels_a), maxOf(doc.labels_b));
 
-  const mode: HighlightMode = showGold ? "gold" : "score";
-  const threshold = showGold ? 0 : scoreThreshold;
-  const peak = showGold ? goldPeak : scorePeak;
-  const sourceLabel = showGold ? "ground truth" : head ?? "model";
+  const sourceLabel = showGold ? "ground truth" : head ? HEAD_LABEL[head] : "model";
   const modeLabel = !showHighlights ? "off" : sourceLabel;
   const verdict = signal ? `  ·  ${signal}` : "";
+  const legend =
+    head === "combined"
+      ? [
+          <span key="lg1">{"  ·  "}</span>,
+          <span key="lg2" fg={theme.addedSignColor}>gru</span>,
+          <span key="lg3">{" · "}</span>,
+          <span key="lg4" fg={theme.fileModified}>diff</span>,
+          <span key="lg5">{" · "}</span>,
+          <span key="lg6" fg={theme.removedSignColor}>both</span>,
+        ]
+      : [];
 
   return (
     <box style={{ width: "100%", flexDirection: "column", backgroundColor: theme.background }}>
       <text fg={theme.muted} bg={theme.background}>
-        {`${doc.id}  ·  ${doc.split}  ·  ${doc.lang.toUpperCase()}  ·  highlight: ${modeLabel}${verdict}`}
+        {[
+          <span key="pre">{`${doc.id}  ·  ${doc.split}  ·  ${doc.lang.toUpperCase()}  ·  highlight: `}</span>,
+          <span key="mode">{modeLabel}</span>,
+          ...legend,
+          <span key="verdict">{verdict}</span>,
+        ]}
       </text>
       <box style={{ width: "100%", flexDirection: "row", backgroundColor: theme.panel }}>
         <Column
           label="EN · text_a"
           tokens={a}
-          values={showGold ? doc.labels_a : scores?.a ?? null}
+          values={showGold ? doc.labels_a : null}
+          prov={model ? combined.provA : null}
+          mask={mask}
+          palette={palette}
           show={showHighlights}
-          mode={mode}
-          threshold={threshold}
-          peak={peak}
+          mode="gold"
+          threshold={0}
+          peak={goldPeak}
           width={colW}
           theme={theme}
         />
@@ -186,11 +223,14 @@ export function PairView({
         <Column
           label={`${doc.lang.toUpperCase()} · text_b`}
           tokens={b}
-          values={showGold ? doc.labels_b : scores?.b ?? null}
+          values={showGold ? doc.labels_b : null}
+          prov={model ? combined.provB : null}
+          mask={mask}
+          palette={palette}
           show={showHighlights}
-          mode={mode}
-          threshold={threshold}
-          peak={peak}
+          mode="gold"
+          threshold={0}
+          peak={goldPeak}
           width={Math.max(12, width - colW - 1)}
           theme={theme}
         />
@@ -202,6 +242,7 @@ export function PairView({
 export function NotePanel({
   note,
   verdict,
+  head,
   running,
   width,
   height = 7,
@@ -209,6 +250,7 @@ export function NotePanel({
 }: {
   note: string;
   verdict?: string | null;
+  head?: Head | null;
   running: boolean;
   width: number;
   theme: AppTheme;
@@ -223,7 +265,7 @@ export function NotePanel({
       ? note
       : running
         ? "…"
-        : "Press ^R to analyse this pair with Apertus (or ^K for DiffAlign).");
+        : "Press ^R for pairprobe (supervised), or ^K for diffalign (unsupervised).");
 
   const lines: string[] = [];
   let cur = "";
@@ -244,7 +286,7 @@ export function NotePanel({
       <Alert
         variant="info"
         icon={icon}
-        title={verdict ? "agent note · ground truth" : "agent note"}
+        title={verdict ? "agent note · ground truth" : head ? `agent note · ${HEAD_LABEL[head]}` : "agent note"}
         message={shown.join("\n")}
       />
     </box>

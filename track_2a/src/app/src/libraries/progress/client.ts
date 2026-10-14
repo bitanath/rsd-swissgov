@@ -1,17 +1,18 @@
 //TODO: Analysis and progress bar handling through workers
-import { words, type Doc } from "../libraries/dataset";
-import type { HeadId, Phase, Signal, WorkerEvent, WorkerRequest } from "./protocol";
+import { words, type Doc } from "../clit/dataset";
+import type { Combined } from "../clit/analyze";
+import type { Phase, Signal, WorkerEvent, WorkerRequest } from "./protocol";
 
 export interface AnalysisHandlers {
   onPhase?: (phase: Phase, pass?: number) => void;
   onProgress?: (phase: Phase, fraction: number, pass?: number) => void;
-  onScores?: (a: Float32Array, b: Float32Array, signal: Signal) => void;
+  onScores?: (a: Float32Array, b: Float32Array, signal: Signal, combined?: Combined) => void;
   onNote?: (text: string) => void;
   onNoteProgress?: (fraction: number) => void;
 }
 
 export interface AnalysisResult {
-  scores: { a: Float32Array; b: Float32Array } | null;
+  combined: Combined | null;
   signal: Signal | null;
   note: string;
   cancelled: boolean;
@@ -19,14 +20,14 @@ export interface AnalysisResult {
 }
 
 export interface AnalysisClient {
-  analyse(doc: Doc, head: HeadId, handlers: AnalysisHandlers): Promise<AnalysisResult>;
+  analyse(doc: Doc, handlers: AnalysisHandlers): Promise<AnalysisResult>;
   cancel(): void;
   dispose(): void;
 }
 
 interface Pending {
   handlers: AnalysisHandlers;
-  scores: { a: Float32Array; b: Float32Array } | null;
+  combined: Combined | null;
   signal: Signal | null;
   note: string;
   resolve: (result: AnalysisResult) => void;
@@ -37,12 +38,13 @@ export function createAnalysisClient(): AnalysisClient {
   let nextId = 1;
   let inFlight = 0;
   const pending = new Map<number, Pending>();
+  const inflight = new Map<string, Promise<AnalysisResult>>();
 
-  const finish = (id: number, result: Omit<AnalysisResult, "scores" | "signal" | "note">): void => {
+  const finish = (id: number, result: Omit<AnalysisResult, "combined" | "signal" | "note">): void => {
     const entry = pending.get(id);
     if (!entry) return;
     pending.delete(id);
-    entry.resolve({ scores: entry.scores, signal: entry.signal, note: entry.note, ...result });
+    entry.resolve({ combined: entry.combined, signal: entry.signal, note: entry.note, ...result });
   };
 
   const route = (event: WorkerEvent): void => {
@@ -57,9 +59,9 @@ export function createAnalysisClient(): AnalysisClient {
         handlers.onProgress?.(event.phase, event.fraction, event.pass);
         break;
       case "scores":
-        entry.scores = { a: event.a, b: event.b };
+        entry.combined = event.combined ?? null;
         entry.signal = event.signal;
-        handlers.onScores?.(event.a, event.b, event.signal);
+        handlers.onScores?.(event.a, event.b, event.signal, event.combined);
         break;
       case "note":
         entry.note = event.text;
@@ -84,7 +86,7 @@ export function createAnalysisClient(): AnalysisClient {
     if (!worker) {
       // Root-relative specifier matching the extra entrypoint passed to
       // `bun build --compile`; the URL form mis-resolves inside $bunfs here.
-      worker = new Worker("./src/progress/worker.ts");
+      worker = new Worker("./src/libraries/progress/worker.ts");
       worker.onmessage = (event: MessageEvent<WorkerEvent>) => route(event.data);
       worker.onerror = (event) => {
         const message = String((event as { message?: unknown }).message ?? "worker error");
@@ -94,12 +96,15 @@ export function createAnalysisClient(): AnalysisClient {
     return worker;
   };
 
-  const analyse: AnalysisClient["analyse"] = (doc, head, handlers) => {
+  const analyse: AnalysisClient["analyse"] = (doc, handlers) => {
+    //FIXME: dedupe by doc so a head switch can never enqueue a second run.
+    const existing = inflight.get(doc.id);
+    if (existing) return existing;
     const active = ensureWorker();
     const id = nextId++;
     inFlight = id;
-    return new Promise<AnalysisResult>((resolve) => {
-      pending.set(id, { handlers, scores: null, signal: null, note: "", resolve });
+    const promise = new Promise<AnalysisResult>((resolve) => {
+      pending.set(id, { handlers, combined: null, signal: null, note: "", resolve });
       const request: WorkerRequest = {
         type: "analyse",
         id,
@@ -107,11 +112,15 @@ export function createAnalysisClient(): AnalysisClient {
         textB: doc.text_b,
         wcA: words(doc.text_a).length,
         wcB: words(doc.text_b).length,
-        head,
         lang: doc.lang,
       };
       active.postMessage(request);
     });
+    inflight.set(doc.id, promise);
+    void promise.finally(() => {
+      if (inflight.get(doc.id) === promise) inflight.delete(doc.id);
+    });
+    return promise;
   };
 
   const cancel = (): void => {
@@ -122,6 +131,7 @@ export function createAnalysisClient(): AnalysisClient {
     worker?.terminate();
     worker = null;
     pending.clear();
+    inflight.clear();
   };
 
   return { analyse, cancel, dispose };

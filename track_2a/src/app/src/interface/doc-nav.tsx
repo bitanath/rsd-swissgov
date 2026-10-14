@@ -8,7 +8,7 @@ import {
   type Doc,
   type Lang,
   type Split,
-} from "../libraries/dataset";
+} from "../libraries/clit/dataset";
 
 export interface NavLang {
   lang: Lang; //TODO: contains user friendly name as well as international code
@@ -89,6 +89,7 @@ export function DocNav({
   onToggleSplit,
   onToggleLang,
   onSelect,
+  onCursor,
 }: {
   rows: NavRow[];
   selectedId: string;
@@ -98,6 +99,7 @@ export function DocNav({
   onToggleSplit: (split: Split) => void;
   onToggleLang: (split: Split, lang: Lang) => void;
   onSelect: (docId: string) => void;
+  onCursor: (index: number) => void;
 }) {
   return (
     <box style={{ width: "100%", flexDirection: "column", backgroundColor: theme.panel }}>
@@ -113,7 +115,10 @@ export function DocNav({
             <box
               key={row.id}
               style={{ width: "100%", height: 1, backgroundColor: bg }}
-              onMouseUp={() => onSelect(row.docId)}
+              onMouseUp={() => {
+                onCursor(index);
+                onSelect(row.docId);
+              }}
             >
               <text fg={fg} bg={bg}>
                 {`${pad}${selected ? "▸ " : "  "}${row.label}`.slice(0, Math.max(1, width - 1))}
@@ -128,7 +133,10 @@ export function DocNav({
             <box
               key={row.id}
               style={{ width: "100%", height: 1, backgroundColor: bg }}
-              onMouseUp={() => onToggleSplit(row.split)}
+              onMouseUp={() => {
+                onCursor(index);
+                onToggleSplit(row.split);
+              }}
             >
               <text fg={theme.accent} bg={bg}>
                 <b>{` ${row.expanded ? "▼" : "▶"} ${row.label}`.slice(0, Math.max(1, width)).toUpperCase()}</b>
@@ -142,7 +150,10 @@ export function DocNav({
           <box
             key={row.id}
             style={{ width: "100%", height: 1, backgroundColor: bg }}
-            onMouseUp={() => onToggleLang(row.split, row.lang)}
+            onMouseUp={() => {
+              onCursor(index);
+              onToggleLang(row.split, row.lang);
+            }}
           >
             <text fg={theme.fileModified} bg={bg}>
               {`${pad}${row.expanded ? "▼" : "▶"} ${row.label}  (${row.count})`.slice(0, Math.max(1, width - 1))}

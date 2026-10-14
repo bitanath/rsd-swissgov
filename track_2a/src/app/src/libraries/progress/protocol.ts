@@ -1,4 +1,4 @@
-export type HeadId = "gru" | "diffalign";
+export type HeadId = "gru" | "diffalign" | "combined";
 export type Signal = "same" | "different";
 export type Phase = "loading" | "capturing" | "classifying" | "writing";
 
@@ -9,7 +9,6 @@ export interface AnalyseRequest {
   textB: string;
   wcA: number;
   wcB: number;
-  head: HeadId;
   lang: string;
 }
 
@@ -33,12 +32,20 @@ export interface ProgressEvent {
   fraction: number;
   pass?: number;
 }
+export interface CombinedScores {
+  a: Float32Array;
+  b: Float32Array;
+  //FIXME: bitmask per word: 1 = GRU flagged it, 2 = DiffAlign flagged it, 3 = both.
+  provA: Uint8Array;
+  provB: Uint8Array;
+}
 export interface ScoresEvent {
   type: "scores";
   id: number;
   a: Float32Array;
   b: Float32Array;
   signal: Signal;
+  combined?: CombinedScores;
 }
 export interface NoteEvent {
   type: "note";

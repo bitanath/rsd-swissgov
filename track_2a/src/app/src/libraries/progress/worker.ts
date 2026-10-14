@@ -1,7 +1,7 @@
-import { ensureModel } from "../funcs";
-import { runNote, signalFromScores } from "../libraries/analyze";
-import type { Doc } from "../libraries/dataset";
-import { pairScoresProgress } from "./ffi";
+import { ensureModel } from "../../funcs";
+import { combinedFrom, runNoteCombined } from "../clit/analyze";
+import type { Doc } from "../clit/dataset";
+import { pairScoresBothProgress } from "./ffi";
 import type { AnalyseRequest, WorkerEvent, WorkerRequest } from "./protocol";
 
 interface WorkerScope {
@@ -32,33 +32,25 @@ async function run(req: AnalyseRequest): Promise<void> {
     ensureModel();
     if (cancelled.has(id)) return post({ type: "cancelled", id });
 
-    const scores = pairScoresProgress(
-      req.textA,
-      req.textB,
-      req.head,
-      req.wcA,
-      req.wcB,
-      (phase, done, total) => {
-        const fraction = total > 0 ? done / total : 0;
-        if (phase === 2) post({ type: "progress", id, phase: "classifying", fraction });
-        else post({ type: "progress", id, phase: "capturing", pass: phase + 1, fraction });
-      },
-    );
+    //TODO: one capture, both heads -> ^r/^k/^d are all instant.
+    const both = pairScoresBothProgress(req.textA, req.textB, req.wcA, req.wcB, (phase, done, total) => {
+      const fraction = total > 0 ? done / total : 0;
+      if (phase === 2) post({ type: "progress", id, phase: "classifying", fraction });
+      else post({ type: "progress", id, phase: "capturing", pass: phase + 1, fraction });
+    });
     if (cancelled.has(id)) return post({ type: "cancelled", id });
-    if (!scores) return post({ type: "error", id, message: "pair_scores_ex failed" });
+    if (!both) return post({ type: "error", id, message: "pair_scores_both_ex failed" });
 
-    const signal = signalFromScores(scores);
-    post({ type: "scores", id, a: scores.a, b: scores.b, signal });
+    //TODO: The agent runs once per pair, on the union (combined) labels; every mode reuses it.
+    const { combined, signal } = combinedFrom(both.gru, both.diff, req.lang);
+    post({ type: "scores", id, a: combined.a, b: combined.b, signal, combined });
 
     post({ type: "phase", id, phase: "writing" });
     const doc = { text_a: req.textA, text_b: req.textB, lang: req.lang } as unknown as Doc;
-    const text = await runNote(
-      doc,
-      signal,
-      (t) => post({ type: "note", id, text: t }),
-      () => cancelled.has(id),
-      (fraction) => post({ type: "noteProgress", id, fraction }),
-    );
+    const onChunk = (t: string) => post({ type: "note", id, text: t });
+    const isCancelled = () => cancelled.has(id);
+    const onNoteProgress = (fraction: number) => post({ type: "noteProgress", id, fraction });
+    const text = await runNoteCombined(doc, combined, signal, onChunk, isCancelled, onNoteProgress);
     if (cancelled.has(id)) return post({ type: "cancelled", id });
     post({ type: "done", id, note: text });
   } catch (err) {

@@ -1,21 +1,20 @@
 import { useMemo, useState } from "react";
 
 import { Modal } from "../components/modal";
-import { HUNK_DIFF_THEME_NAMES } from "../libraries/hunk/opentui/themes";
-import { useHunkTheme } from "../libraries/theme";
+import { SELECTABLE_THEMES, useHunkTheme } from "../libraries/theme";
 
 export function ThemeModal({ onClose }: { onClose: () => void }) {
   const { name, theme, setTheme } = useHunkTheme();
-  // Capture the theme active on open, once: preview must not move the revert target.
+  //FIXME: Capture the theme active on open, once: preview must not move the revert target.
   const [original] = useState(name);
 
   const options = useMemo(
-    () => HUNK_DIFF_THEME_NAMES.map((id) => ({ name: id, description: "", value: id })),
+    () => SELECTABLE_THEMES.map((id) => ({ name: id, description: "", value: id })),
     [],
   );
-  const selectedIndex = Math.max(0, HUNK_DIFF_THEME_NAMES.indexOf(name));
-  // Hunk bundles ~65 themes; window the list so it never overflows the panel.
-  const listHeight = Math.min(HUNK_DIFF_THEME_NAMES.length, 16);
+  const selectedIndex = Math.max(0, SELECTABLE_THEMES.indexOf(name));
+  // FIXME: Curated list (github / catppuccin / vitesse); window it so it never overflows.
+  const listHeight = Math.min(SELECTABLE_THEMES.length, 16);
 
   const revertAndClose = () => {
     setTheme(original);
@@ -39,14 +38,14 @@ export function ThemeModal({ onClose }: { onClose: () => void }) {
           selectedIndex={selectedIndex}
           showSelectionIndicator
           onSelect={(index: number) => {
-            const next = HUNK_DIFF_THEME_NAMES[index];
+            const next = SELECTABLE_THEMES[index];
             if (next) {
               setTheme(next);
               onClose();
             }
           }}
           onChange={(index: number) => {
-            const next = HUNK_DIFF_THEME_NAMES[index];
+            const next = SELECTABLE_THEMES[index];
             if (next) setTheme(next);
           }}
         />

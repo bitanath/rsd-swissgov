@@ -1,14 +1,14 @@
 import { readFileSync } from "node:fs";
 import { parseDiffFromFile } from "@pierre/diffs";
 
-import { createHunkDiffFile, type HunkDiffFileInput } from "./hunk/opentui";
+import { createHunkDiffFile, type HunkDiffFileInput } from "../hunk/opentui";
 
 export interface DiffOptions {
   language?: string; //FIXME only DE, FR, IT and EN supported for now
   path?: string;
   id?: string;
   context?: number;
-  note?: string; //per-file note that can be rendered in TUI
+  note?: string; //FIXME per-file note that can be rendered in TUI
 }
 
 export function diffTexts(textA: string, textB: string, opts: DiffOptions = {}): HunkDiffFileInput {

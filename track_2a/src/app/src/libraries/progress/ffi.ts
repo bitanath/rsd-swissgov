@@ -1,6 +1,6 @@
 import { dlopen, JSCallback, ptr } from "bun:ffi";
 
-import { ensureModel, LIB_PATH } from "../funcs";
+import { ensureModel, LIB_PATH } from "../../funcs";
 import type { HeadId } from "./protocol";
 
 export interface PairScores {
@@ -15,6 +15,10 @@ const { symbols } = dlopen(LIB_PATH, {
     args: ["ptr", "cstring", "cstring", "i32", "ptr", "usize", "ptr", "usize", "ptr"],
     returns: "i32",
   },
+  pair_scores_both_ex: {
+    args: ["ptr", "cstring", "cstring", "ptr", "usize", "ptr", "usize", "ptr", "usize", "ptr", "usize", "ptr"],
+    returns: "i32",
+  },
 });
 
 const enc = new TextEncoder();
@@ -23,6 +27,51 @@ function encodeString(s: string): Uint8Array {
   const out = new Uint8Array(bytes.length + 1);
   out.set(bytes, 0);
   return out;
+}
+
+export interface BothScores {
+  gru: PairScores;
+  diff: PairScores;
+}
+
+export function pairScoresBothProgress(
+  textA: string,
+  textB: string,
+  wcA: number,
+  wcB: number,
+  onProgress?: HeadProgress,
+): BothScores | null {
+  const handle = ensureModel();
+  const gruA = new Float32Array(wcA);
+  const gruB = new Float32Array(wcB);
+  const diffA = new Float32Array(wcA);
+  const diffB = new Float32Array(wcB);
+  const za = encodeString(textA);
+  const zb = encodeString(textB);
+  const cb = new JSCallback(
+    (phase: number, done: number, total: number) => onProgress?.(phase, done, total),
+    { args: ["u32", "u32", "u32"], returns: "void" },
+  );
+  try {
+    const rc = symbols.pair_scores_both_ex(
+      handle,
+      za,
+      zb,
+      ptr(gruA),
+      wcA,
+      ptr(gruB),
+      wcB,
+      ptr(diffA),
+      wcA,
+      ptr(diffB),
+      wcB,
+      cb.ptr,
+    ) as number;
+    if (rc !== 0) return null;
+    return { gru: { a: gruA, b: gruB }, diff: { a: diffA, b: diffB } };
+  } finally {
+    cb.close();
+  }
 }
 
 export function pairScoresProgress(

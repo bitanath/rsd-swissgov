@@ -44,7 +44,7 @@ export function Autocomplete({
               paddingRight={1}
               backgroundColor={active ? theme.colors.primary : undefined}
             >
-              <text fg={fg} flexShrink={0}>{`/${option.label}`}</text>
+              <text fg={fg} flexShrink={0}>{`/${option.name}`}</text>
               <text fg={dim} wrapMode="none">{`  ${option.description}`}</text>
             </box>
           );

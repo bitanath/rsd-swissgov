@@ -157,11 +157,6 @@ export interface PairScores {
   b: Float32Array;
 }
 
-/**
- * Run one RSD head over a single document pair. The heavy lifting (L14-17
- * capture, word pooling, GRU/DiffAlign) happens in the Zig core; this just hands
- * over the two texts and receives one f32 per whitespace word per side.
- */
 export function pairScores(
   textA: string,
   textB: string,
@@ -186,8 +181,8 @@ export function pairScores(
   ) as number;
   void za;
   void zb;
-  if (rc !== 0) return null;
-  return { a: outA, b: outB };
+  if (rc !== 0) return null; 
+  return { a: outA, b: outB }; //TODO: We run across both heads for both pairs
 }
 
 export function freeModel(): void {

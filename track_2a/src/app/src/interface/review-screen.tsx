@@ -4,13 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AutocompleteOption } from "../components/autocomplete";
 import { Alert } from "../components/alert";
 import { Spinner } from "../components/spinner";
-import type { Head, Signal } from "../libraries/analyze";
-import { signalFromGold } from "../libraries/analyze";
-import { COMMANDS, runCommand, type LayoutMode, type ModalKind } from "../libraries/commands";
-import { findDoc, type Lang, type Split } from "../libraries/dataset";
-import type { PairScores } from "../funcs";
+import type { Head, Signal } from "../libraries/clit/analyze";
+import { HEAD_LABEL, signalFromGold, type Combined } from "../libraries/clit/analyze";
+import { COMMANDS, runCommand, type ModalKind } from "../libraries/clit/commands";
+import { findDoc, type Lang, type Split } from "../libraries/clit/dataset";
+import { useCopyOnSelect } from "../libraries/clit/clipboard";
 import { useHunkTheme } from "../libraries/theme";
-import { createAnalysisClient, type Phase } from "../progress";
+import { createAnalysisClient, type Phase } from "../libraries/progress";
 import { buildTree, DocNav, firstDocId, langId, splitId, visibleRows } from "./doc-nav";
 import { HelpModal } from "./help-modal";
 import { NotePanel, PairView } from "./pair-view";
@@ -19,10 +19,10 @@ import { ThemeModal } from "./theme-modal";
 import { useToast } from "./toaster";
 
 const NAV_WIDTH = 34;
+const NAV_GAP = 2;
 
 interface DocCache {
-  head: Head | null;
-  scores: PairScores | null;
+  combined: Combined | null;
   note: string;
   signal: Signal | null;
 }
@@ -50,7 +50,7 @@ function phaseLabel(phase: Phase | null, pass: number | undefined, progress: num
     case "classifying":
       return `classifying intermediate outputs${pct}`;
     case "writing":
-      return `writing note${pct}`;
+      return `writing note${pct.length > 0 ?pct:" · prefilling.."}`;
     default:
       return "working…";
   }
@@ -62,11 +62,17 @@ export function ReviewScreen(_props: { initialFile?: unknown }) {
   const renderer = useRenderer();
   const toast = useToast();
 
+  useCopyOnSelect((copied) =>
+    toast(copied ? "copied to clipboard" : "could not copy to clipboard", {
+      variant: copied ? "info" : "warning",
+      duration: 2000,
+    }),
+  );
+
   const client = useMemo(() => createAnalysisClient(), []);
   const tree = useMemo(() => buildTree(), []);
 
   const [selectedId, setSelectedId] = useState(() => firstDocId(tree));
-  const [layout, setLayout] = useState<LayoutMode>("split");
   const [modal, setModal] = useState<ModalKind | null>(null);
   const [showHighlights, setShowHighlights] = useState(true);
   const [showGold, setShowGold] = useState(true);
@@ -75,7 +81,7 @@ export function ReviewScreen(_props: { initialFile?: unknown }) {
   const [pass, setPass] = useState<number | undefined>(undefined);
   const [progress, setProgress] = useState(0);
   const [head, setHead] = useState<Head | null>(null);
-  const [scores, setScores] = useState<PairScores | null>(null);
+  const [combined, setCombined] = useState<Combined | null>(null);
   const [note, setNote] = useState("");
   const [signal, setSignal] = useState<Signal | null>(null);
   const [running, setRunning] = useState(false);
@@ -91,10 +97,11 @@ export function ReviewScreen(_props: { initialFile?: unknown }) {
 
   const cache = useRef<Record<string, DocCache>>({});
   const selectedRef = useRef(selectedId);
+  const runningRef = useRef(false);
   selectedRef.current = selectedId;
 
   const doc = findDoc(selectedId);
-  const mainWidth = Math.max(40, width - NAV_WIDTH);
+  const mainWidth = Math.max(40, width - NAV_WIDTH - NAV_GAP);
 
   const goldSignal = doc ? signalFromGold(doc) : null;
   const goldVerdict =
@@ -107,9 +114,9 @@ export function ReviewScreen(_props: { initialFile?: unknown }) {
 
   useEffect(() => {
     client.cancel();
+    runningRef.current = false;
     const c = cache.current[selectedId];
-    setHead(c?.head ?? null);
-    setScores(c?.scores ?? null);
+    setCombined(c?.combined ?? null);
     setNote(c?.note ?? "");
     setSignal(c?.signal ?? null);
     setStatus("idle");
@@ -117,6 +124,9 @@ export function ReviewScreen(_props: { initialFile?: unknown }) {
     setPass(undefined);
     setProgress(0);
     setRunning(false);
+    // Any document change lands on the ground-truth highlighted view.
+    setShowGold(true);
+    setShowHighlights(true);
   }, [selectedId, client]);
 
   useEffect(() => () => client.dispose(), [client]);
@@ -131,56 +141,72 @@ export function ReviewScreen(_props: { initialFile?: unknown }) {
     async (target: Head) => {
       if (!doc) return;
       const id = doc.id;
+      setHead(target);
+      const cached = cache.current[id];
+      if (cached?.combined) {
+        setCombined(cached.combined);
+        setSignal(cached.signal);
+        setNote(cached.note);
+        setShowGold(false);
+        setStatus("idle");
+        return;
+      }
+      //FIXME: one capture + one agent note per document; only the highlight is per-mode.
+      if (runningRef.current) return;
+      runningRef.current = true;
       setRunning(true);
       setPhase("loading");
       setPass(undefined);
       setProgress(0);
-      setHead(target);
-      setScores(cache.current[id]?.head === target ? cache.current[id]?.scores ?? null : null);
-      setStatus(target === "gru" ? "computing layerwise + GRU…" : "computing layerwise + DiffAlign…");
+      setCombined(null);
+      setSignal(null);
+      setNote("");
+      setStatus(`computing layerwise + ${HEAD_LABEL[target]}…`);
 
-      const result = await client.analyse(doc, target, {
-        onPhase: (next, nextPass) => {
-          if (selectedRef.current !== id) return;
-          setPhase(next);
-          setPass(nextPass);
-          if (next !== "capturing") setProgress(0);
-        },
-        onProgress: (next, fraction, nextPass) => {
-          if (selectedRef.current !== id) return;
-          setPhase(next);
-          setPass(nextPass);
-          setProgress(fraction);
-        },
-        onScores: (a, b, sig) => {
-          if (selectedRef.current !== id) return;
-          const scored: PairScores = { a, b };
-          setScores(scored);
-          setSignal(sig);
-          // Model output is in: switch off ground truth so the streamed note + scores show.
-          setShowGold(false);
-          cache.current[id] = { head: target, scores: scored, note: cache.current[id]?.note ?? "", signal: sig };
-        },
-        onNote: (text) => {
-          if (selectedRef.current === id) setNote(text);
-        },
-        onNoteProgress: (fraction) => {
-          if (selectedRef.current === id) setProgress(fraction);
-        },
-      });
+      try {
+        const result = await client.analyse(doc, {
+          onPhase: (next, nextPass) => {
+            if (selectedRef.current !== id) return;
+            setPhase(next);
+            setPass(nextPass);
+            if (next !== "capturing") setProgress(0);
+          },
+          onProgress: (next, fraction, nextPass) => {
+            if (selectedRef.current !== id) return;
+            setPhase(next);
+            setPass(nextPass);
+            setProgress(fraction);
+          },
+          onScores: (_a, _b, sig, comb) => {
+            if (selectedRef.current !== id) return;
+            setCombined(comb ?? null);
+            setSignal(sig);
+            // Model output is in: switch off ground truth so the scores + note show.
+            setShowGold(false);
+          },
+          onNote: (text) => {
+            if (selectedRef.current === id) setNote(text);
+          },
+          onNoteProgress: (fraction) => {
+            if (selectedRef.current === id) setProgress(fraction);
+          },
+        });
 
-      if (selectedRef.current === id) {
-        setScores(result.scores);
-        setSignal(result.signal);
-        setNote(result.note);
-        if (result.scores) {
-          cache.current[id] = { head: target, scores: result.scores, note: result.note, signal: result.signal };
+        if (selectedRef.current === id) {
+          setCombined(result.combined);
+          setSignal(result.signal);
+          setNote(result.note);
+          if (result.combined) {
+            cache.current[id] = { combined: result.combined, signal: result.signal, note: result.note };
+          }
+          setRunning(false);
+          setPhase(null);
+          setPass(undefined);
+          setProgress(0);
+          setStatus("idle");
         }
-        setRunning(false);
-        setPhase(null);
-        setPass(undefined);
-        setProgress(0);
-        setStatus("idle");
+      } finally {
+        runningRef.current = false;
       }
     },
     [doc, client],
@@ -205,6 +231,7 @@ export function ReviewScreen(_props: { initialFile?: unknown }) {
       else if (key.name === "p") setModal("help");
       else if (key.name === "r") void analyse("gru");
       else if (key.name === "k") void analyse("diffalign");
+      else if (key.name === "d") void analyse("combined");
       else if (key.name === "e") setShowHighlights((h) => !h);
       else if (key.name === "g") setShowGold((g) => !g);
       return;
@@ -227,26 +254,20 @@ export function ReviewScreen(_props: { initialFile?: unknown }) {
     } else if (key.name === "down") {
       key.preventDefault();
       setCursorIndex(Math.min(rows.length - 1, safeCursor + 1));
-    } else if (key.name === "right" || key.name === "space" || key.name === "return") {
+    } else if (key.name === "space" || key.name === "return") {
       key.preventDefault();
       openRow();
-    } else if (key.name === "left") {
-      key.preventDefault();
-      if (!row) return;
-      if (row.kind === "split") setExpandedSplits((set) => toggleMember(set, row.id, false));
-      else if (row.kind === "lang") setExpandedLangs((set) => toggleMember(set, row.id, false));
     }
   });
 
   const onSubmit = (text: string) => {
     runCommand(text, {
-      layout,
-      setLayout,
       quit,
       openModal: setModal,
       toast: (message, variant) => toast(message, variant ? { variant } : undefined),
       runGru: () => void analyse("gru"),
       runDiffalign: () => void analyse("diffalign"),
+      runCombined: () => void analyse("combined"),
       toggleHighlights: () => setShowHighlights((h) => !h),
       toggleGold: () => setShowGold((g) => !g),
     });
@@ -295,10 +316,11 @@ export function ReviewScreen(_props: { initialFile?: unknown }) {
               onToggleSplit={toggleSplit}
               onToggleLang={toggleLang}
               onSelect={selectDoc}
+              onCursor={setCursorIndex}
             />
           </scrollbox>
         </box>
-        <box style={{ width: 2, height: "100%", backgroundColor: theme.background }} />
+        <box style={{ width: NAV_GAP, height: "100%", backgroundColor: theme.background }} />
         <box
           style={{
             width: mainWidth,
@@ -320,7 +342,7 @@ export function ReviewScreen(_props: { initialFile?: unknown }) {
                 doc={doc}
                 width={mainWidth}
                 theme={theme}
-                scores={scores}
+                combined={combined}
                 head={head}
                 signal={activeSignal}
                 showHighlights={showHighlights}
@@ -333,6 +355,7 @@ export function ReviewScreen(_props: { initialFile?: unknown }) {
           <NotePanel
             note={note}
             verdict={showGold ? goldVerdict : null}
+            head={head}
             running={running}
             width={mainWidth}
             theme={theme}
@@ -347,10 +370,14 @@ export function ReviewScreen(_props: { initialFile?: unknown }) {
         focused={modal === null}
       />
 
-      <box style={{ width: "100%", height: 1, flexDirection: "row", flexShrink: 0 }}>
+      <box
+        style={{ width: "100%", height: 1, flexShrink: 0 }}
+        flexDirection="row"
+        justifyContent="center"
+      >
         <text
           fg={theme.muted}
-        >{`[↑/↓] doc  ·  [←/→] collapse/expand  ·  [^e] highlights  ·  [^g] ground truth  ·  [^r] GRU  ·  [^k] DiffAlign  ·  [^p] help  ·  [^t] theme  ·  [^c] quit`}</text>
+        >{`[↑/↓] doc  ·  [^e] highlights  ·  [^g] ground truth  ·  [^r] ${HEAD_LABEL.gru}  ·  [^k] ${HEAD_LABEL.diffalign}  ·  [^d] ${HEAD_LABEL.combined}  ·  [^p] help  ·  [^t] theme  ·  [^c] quit`}</text>
       </box>
 
       {modal === "help" && <HelpModal onClose={() => setModal(null)} />}

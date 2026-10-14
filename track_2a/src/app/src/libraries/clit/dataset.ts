@@ -1,4 +1,4 @@
-import raw from "../data/swissgov.json"; //NOTE ground truths
+import raw from "../../data/swissgov.json"; //NOTE ground truths
 
 export type Lang = "de" | "fr" | "it";
 export type Split = "test" | "dev";
