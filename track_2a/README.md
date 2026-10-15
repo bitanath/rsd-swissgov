@@ -1,62 +1,87 @@
-# Academia Challenges
+# aperdiff — code details (Track 2A)
 
-Submissions must use the Apertus model family.
-For Track 2 this means that submitted solutions must be built with Apertus. Other open-weights models can be used to support development, e.g. as automatic judges during evaluation. Their role must be clearly described in the submission report.
+This directory holds the source of the submission. The build/run instructions and
+the results live in the repository-root [`README.md`](../README.md); the write-up
+is in [`technical_report.md`](../technical_report.md).
 
-💬 In case you have questions, join the conversation on Discord or send an email to “hello@hackapertus.ch”
+## Layout
 
-## How it works
-Pick from 5 academia challenges provided by Swiss academic institutions:
-
-- **FHGR:** AI-Powered Job Interview Coach
-- **OpenParlData:** Extracting Parliamentary Affairs from PDFs into One Common Structure
-- **OST:** Multilingual Natural Language Inference over Swiss Official Voting Booklets
-- **UZH:** Detecting Cross-Lingual Semantic Differences in Swiss Government Websites
-- **ZHAW:** See It, Say It, Pick It: Vision-Language Grounding for a Real Robot Arm
-
-The challenges incl. submission and judging criteria are described in our **Getting Started guide**:
-https://hackapertus.notion.site/getting-started-guide-onlinehack
-
-## Run it
-
-Keep `track_2a/` as it is: don't rename it or move its files, just delete the
-other track directories.
-
-From the root of the project:
-
-```bash
-make run
+```
+src/
+├── app/                 Bun + OpenTUI (TypeScript) application
+│   ├── index.tsx        entry point: speedtest → smoke → results/predict → TUI
+│   └── src/
+│       ├── terminalexec.ts   headless CLI: `results` / `predict`
+│       ├── smoke.ts          --smoke self-check
+│       ├── speedtest.ts      --speedtest throughput probe
+│       ├── funcs.ts          bun:ffi bindings to the engine (libelthur)
+│       ├── interface/        TUI screens (doc browser, pair view, notes)
+│       └── libraries/
+│           ├── clit/         headless helpers: analyze, dataset, metrics
+│           ├── hunk/         vendored diff/rendering layer (OpenTUI)
+│           └── progress/     worker-based per-token progress
+├── python/              training / ablation / judging (PyTorch)
+│   ├── probationists.py      pair-probe architectures + training
+│   ├── ablation.py           training-free 32-layer readout
+│   ├── judging.py            SwissGov-RSD harness replication
+│   ├── diffalign.py          unsupervised DiffAlign head
+│   ├── export.py             bake artifacts: gru.bin + swissgov.json(l)
+│   └── layerwise/            checkpoints (.pth) + dataset/ (SwissGov, iSTS)
+├── libelthur-arm64.so   prebuilt CPU engine (Linux arm64)
+├── libelthur-amd64.so   prebuilt CPU engine (Linux amd64)
+└── libelthur.dylib      prebuilt CPU engine (macOS arm64)
 ```
 
-Fill in the [Makefile](Makefile) so that it works on a clean checkout. It is
-expected to run the project in a Docker container, since that is how the judges
-will run it, without relying on anything already installed on your machine.
+## How it works
 
-Requirements: `runtime, hardware, API keys, model weights`
+Two heads over one frozen backbone (see `python/ABLATION.md` for the research
+narrative):
 
-## Data
-The `data/` directory must not exceed 100 MB.
+- **Capture.** Apertus is causal, so each side is read with the other side in
+  context using two passes: `[B][A]` keeps the English rows, `[A][B]` keeps the
+  other-language rows. Only residual sites **L14–17** are captured, and a
+  capture-only early exit after L15 makes this ~2× faster with bit-identical L15
+  vectors.
+- **DiffAlign (unsupervised).** `s = 1 − max_j cos(h_i, h_j)` — the maximum
+  cosine similarity to any token on the other side; training-free.
+- **Pair probe (supervised).** `[EN;XX]` token features are concatenated with a
+  segment marker and scored by a small bidirectional GRU (projection → LayerNorm
+  → GELU → GRU → per-token head), trained with BCE. Only these ~2M parameters are
+  learned. Architecture chosen by a `dev` screen (`probationists.py`); the final
+  checkpoint is `layerwise/pairprobe_best_L14-15-16-17_sum_bce_gru_devsel.pth`.
 
+## Headless CLI
 
-## 📦 Submission Requirements & Deliverables
-❗️ Submissions are not handled on Devpost. Submit through our website only:
-http://hackapertus.ch/online-hack/submissions
+`app/src/terminalexec.ts` implements the judge-facing surface. In the container:
 
-Requirements differ by challenge. See the description of the challenge you are entering for the exact deliverables.
+```
+results [--lang de,fr,it|all] [--test] [--json]
+predict [--head supervised|unsupervised|combined] [--lang …] \
+        [--input file.jsonl] [--output name] [--test] [--json]
+--smoke [--smoke-fast]      --speedtest (alias --bench)
+```
 
+The `results`/`predict` tables print the paper's **per-document** metrics
+(`spearman`, `kendall`), computed in `app/src/libraries/clit/metrics.ts` with the
+same semantics as the SwissGov-RSD harness (pooled over both texts, gold `-1`
+dropped, predictions aligned to gold length).
 
-## ⚖️ Judging Criteria
-Judging criteria also differ by challenge. See the respective challenge description.
+## Engine libraries
 
+`libelthur-*.so` / `libelthur.dylib` are the compiled CPU engine (the Zig `core/`
+of the upstream `aperdiff` project). They are shipped prebuilt so the app can be
+compiled without a Zig toolchain. The Docker build stages the matching library as
+`app/libelthur.bin` before `bun build --compile`.
 
-## Support
+## Python pipeline
 
-**Licensing requirements**
-Please check our Terms & Conditions (6. What you build is open source):
-https://hackapertus.ch/terms-and-conditions
+```bash
+python -m venv .venv && . .venv/bin/activate && pip install -r python/requirements.txt
 
-## FAQ
-💡 https://hackapertus.ch/faq
+python python/ablation.py --split val --limit 20 --calib-frac 0.35 --out ablation_devsel.json
+python python/judging.py --system probe --tag devsel --arch gru
+python python/export.py            # -> core/assets/gru.bin + app/src/data/swissgov.json(l)
+```
 
-## Contact
-💬 In case you have questions, join the conversation on Discord or send an email to “hello@hackapertus.ch”
+Feature caches (`python/layerwise/*_L14..17.pt`) are large and are **not** checked
+in; regenerate them with the capture scripts before training.

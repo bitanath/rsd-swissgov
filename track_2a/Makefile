@@ -1,6 +1,9 @@
-.PHONY: run
+# The canonical Makefile lives at the repository root. This forwards so `make run`
+# (and the other targets) also work from inside track_2a/. Command-line variables
+# such as MODE=, HEAD=, LANG= are passed through to the sub-make automatically.
+.DEFAULT_GOAL := run
 
-# Replace with the command that starts the project in a Docker container,
-# e.g. `docker compose up`. It must work from a clean checkout.
-run:
-	@echo "make run is not implemented yet — edit this Makefile"; exit 1
+.PHONY: run build push help
+
+run build push help:
+	@$(MAKE) --no-print-directory -C .. $@

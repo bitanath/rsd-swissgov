@@ -25,3 +25,7 @@ build/
 .DS_Store
 .idea/
 .vscode/
+
+# aperdiff
+outputs/
+tmp/
