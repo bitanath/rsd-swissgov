@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { generate, streamGenerate } from "./funcs";
 import { words } from "./libraries/clit/dataset";
 import {
+  bundledGoldById,
   metaFromPredictions,
   predictRows,
   readBundledResults,
@@ -50,8 +51,17 @@ async function checkBundledResults(): Promise<void> {
   const de = all.filter((r) => r.id.startsWith("admin_de_"));
   check("lang filter (de)", de.length === 224, `${de.length} rows`);
 
-  const table = renderMetaTable(metaFromPredictions(de));
+  const metas = metaFromPredictions(de, await bundledGoldById());
+  const table = renderMetaTable(metas);
   check("markdown table has header + rows", table.split("\n").length >= 3, `${table.split("\n").length} lines`);
+  const header = table.split("\n")[0] ?? "";
+  check("results table exposes spearman + kendall", header.includes("spearman") && header.includes("kendall"));
+  const first = metas[0];
+  check(
+    "first de doc scored (rho, tau-b finite)",
+    first !== undefined && first.spearman !== null && first.kendall !== null && Number.isFinite(first.spearman) && Number.isFinite(first.kendall),
+    first ? `ρ=${first.spearman?.toFixed(3)} τ-b=${first.kendall?.toFixed(3)}` : "",
+  );
   say(table.split("\n").slice(0, 4).join("\n"));
   say(`  … (${de.length} de rows rendered)`);
 

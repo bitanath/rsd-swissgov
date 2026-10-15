@@ -2,6 +2,7 @@
 import { ensureModel } from "./funcs";
 import { T_DIFF, T_GRU } from "./libraries/clit/analyze";
 import { words } from "./libraries/clit/dataset";
+import { docMetric } from "./libraries/clit/metrics";
 import { pairScoresBothProgress, pairScoresProgress, type HeadProgress } from "./libraries/progress/ffi";
 import { type Align, naturalWidths, padCell } from "./libraries/table";
 import swissgovJsonlPath from "./data/swissgov.jsonl" with { type: "file" };
@@ -20,6 +21,8 @@ export interface ExecRow {
   text_b: string;
   labels_a: number[];
   labels_b: number[];
+  spearman?: number | null;
+  kendall?: number | null;
 }
 
 interface RowMeta {
@@ -28,6 +31,13 @@ interface RowMeta {
   verdict: "same" | "different";
   flagged_a: number;
   flagged_b: number;
+  spearman: number | null;
+  kendall: number | null;
+}
+
+export interface GoldRow {
+  labels_a: number[];
+  labels_b: number[];
 }
 
 function argValue(flag: string): string | undefined {
@@ -88,6 +98,66 @@ export async function readBundledResults(): Promise<ExecRow[]> {
   return parseJsonl(await Bun.file(predictionsJsonlPath).text()).map(toExecRow);
 }
 
+export function splitOf(row: Record<string, unknown>): string | undefined {
+  const s = row["split"];
+  return typeof s === "string" ? s : undefined;
+}
+
+let bundledTestIdsCache: Set<string> | undefined;
+
+// The scored split is the benchmark test split. Rows carry `split` when they come
+// from the bundled data; `results` reads predictions.jsonl (no `split`), so fall
+// back to membership in the bundled test-id set.
+export async function bundledTestIds(): Promise<Set<string>> {
+  if (!bundledTestIdsCache) {
+    const rows = await readBundledInput();
+    bundledTestIdsCache = new Set(
+      rows.filter((r) => r["split"] === "test").map((r) => String(r["id"] ?? "")),
+    );
+  }
+  return bundledTestIdsCache;
+}
+
+export function filterTestRows(
+  rows: Record<string, unknown>[],
+  testIds: Set<string>,
+): Record<string, unknown>[] {
+  return rows.filter((r) => {
+    const s = splitOf(r);
+    return s !== undefined ? s === "test" : testIds.has(String(r["id"] ?? ""));
+  });
+}
+
+let bundledGoldCache: Map<string, GoldRow> | undefined;
+
+/** Bundled gold labels (from data/swissgov.jsonl) keyed by document id. */
+export async function bundledGoldById(): Promise<Map<string, GoldRow>> {
+  if (!bundledGoldCache) {
+    const rows = await readBundledInput();
+    bundledGoldCache = new Map();
+    for (const r of rows) {
+      bundledGoldCache.set(String(r["id"] ?? ""), {
+        labels_a: Array.isArray(r["labels_a"]) ? (r["labels_a"] as number[]).map(Number) : [],
+        labels_b: Array.isArray(r["labels_b"]) ? (r["labels_b"] as number[]).map(Number) : [],
+      });
+    }
+  }
+  return bundledGoldCache;
+}
+
+function goldOfRow(row: Record<string, unknown>): GoldRow | null {
+  const a = Array.isArray(row["labels_a"]) ? (row["labels_a"] as number[]).map(Number) : [];
+  const b = Array.isArray(row["labels_b"]) ? (row["labels_b"] as number[]).map(Number) : [];
+  if (a.length === 0 && b.length === 0) return null;
+  return { labels_a: a, labels_b: b };
+}
+
+function metricColumns(predA: number[], predB: number[], gold: GoldRow | null): { spearman: number | null; kendall: number | null } {
+  if (!gold) return { spearman: null, kendall: null };
+  const m = docMetric(predA, predB, gold.labels_a, gold.labels_b);
+  return { spearman: Number.isNaN(m.spearman) ? null : m.spearman, kendall: Number.isNaN(m.kendall) ? null : m.kendall };
+}
+
 export interface ComputedRow {
   labels_a: number[];
   labels_b: number[];
@@ -139,7 +209,7 @@ export function computeRow(textA: string, textB: string, head: HeadArg, lang: La
   }
 
   const different = flaggedA + flaggedB > 0;
-  return { labels_a: a, labels_b: b, meta: { id: "", lang, verdict: different ? "different" : "same", flagged_a: flaggedA, flagged_b: flaggedB } };
+  return { labels_a: a, labels_b: b, meta: { id: "", lang, verdict: different ? "different" : "same", flagged_a: flaggedA, flagged_b: flaggedB, spearman: null, kendall: null } };
 }
 
 export async function predictRows(
@@ -156,8 +226,9 @@ export async function predictRows(
     const id = String(row["id"] ?? "");
     const lang = langOf(row);
     const computed = computeRow(String(row["text_a"] ?? ""), String(row["text_b"] ?? ""), head, lang, onSub);
-    predictions.push({ id, text_a: String(row["text_a"] ?? ""), text_b: String(row["text_b"] ?? ""), labels_a: computed.labels_a, labels_b: computed.labels_b });
-    metas.push({ ...computed.meta, id });
+    const metrics = metricColumns(computed.labels_a, computed.labels_b, goldOfRow(row));
+    predictions.push({ id, text_a: String(row["text_a"] ?? ""), text_b: String(row["text_b"] ?? ""), labels_a: computed.labels_a, labels_b: computed.labels_b, ...metrics });
+    metas.push({ ...computed.meta, id, ...metrics });
     onDoc?.(i + 1, selected.length);
   });
   return { predictions, metas };
@@ -179,11 +250,15 @@ export function renderMarkdownTable(headers: string[], rows: string[][], aligns?
   return [renderRow(headers), rule, ...rows.map(renderRow)].join("\n");
 }
 
-const TABLE_HEADERS = ["id", "lang", "verdict", "flagged_a", "flagged_b"];
-const TABLE_ALIGNS: Align[] = ["left", "left", "left", "right", "right"];
+const TABLE_HEADERS = ["id", "lang", "verdict", "flagged_a", "flagged_b", "spearman", "kendall"];
+const TABLE_ALIGNS: Align[] = ["left", "left", "left", "right", "right", "right", "right"];
+
+function fmtMetric(v: number | null): string {
+  return v === null || Number.isNaN(v) ? "—" : v.toFixed(3);
+}
 
 export function renderMetaTable(metas: RowMeta[]): string {
-  const rows = metas.map((m) => [m.id, m.lang, m.verdict, String(m.flagged_a), String(m.flagged_b)]);
+  const rows = metas.map((m) => [m.id, m.lang, m.verdict, String(m.flagged_a), String(m.flagged_b), fmtMetric(m.spearman), fmtMetric(m.kendall)]);
   const totalFlaggedA = metas.reduce((n, m) => n + m.flagged_a, 0);
   const totalFlaggedB = metas.reduce((n, m) => n + m.flagged_b, 0);
   const different = metas.filter((m) => m.verdict === "different").length;
@@ -191,13 +266,14 @@ export function renderMetaTable(metas: RowMeta[]): string {
   return renderMarkdownTable(TABLE_HEADERS, rows, TABLE_ALIGNS) + footer;
 }
 
-export function metaFromPredictions(rows: ExecRow[]): RowMeta[] {
+export function metaFromPredictions(rows: ExecRow[], goldById?: Map<string, GoldRow>): RowMeta[] {
   return rows.map((r) => {
     const lang = langOf({ id: r.id });
     const tg = T_GRU[lang] ?? 0.1;
     const flaggedA = r.labels_a.reduce((n, v) => n + (v > tg ? 1 : 0), 0);
     const flaggedB = r.labels_b.reduce((n, v) => n + (v > tg ? 1 : 0), 0);
-    return { id: r.id, lang, verdict: flaggedA + flaggedB > 0 ? "different" : "same", flagged_a: flaggedA, flagged_b: flaggedB };
+    const metrics = metricColumns(r.labels_a, r.labels_b, goldById?.get(r.id) ?? null);
+    return { id: r.id, lang, verdict: flaggedA + flaggedB > 0 ? "different" : "same", flagged_a: flaggedA, flagged_b: flaggedB, ...metrics };
   });
 }
 
@@ -274,20 +350,29 @@ export async function runTerminalExec(): Promise<void> {
   const results = process.argv.includes("results");
   const langs = parseLangs(argValue("--lang"));
   const asJson = argPresent("--json");
+  const testOnly = argPresent("--test");
 
   if (results) {
-    const rows = (await readBundledResults()).filter((r) => langs.includes(langOf({ id: r.id })));
-    const output = asJson ? jsonlOf(rows) : renderMetaTable(metaFromPredictions(rows));
+    let rows = (await readBundledResults()).filter((r) => langs.includes(langOf({ id: r.id })));
+    if (testOnly) {
+      const testIds = await bundledTestIds();
+      rows = rows.filter((r) => testIds.has(r.id));
+    }
+    const metas = metaFromPredictions(rows, await bundledGoldById());
+    const output = asJson
+      ? jsonlOf(rows.map((r, i) => ({ ...r, spearman: metas[i]!.spearman, kendall: metas[i]!.kendall })))
+      : renderMetaTable(metas);
     process.stdout.write(`${output}\n`);
     return;
   }
 
   const head = parseHead(argValue("--head"));
   const input = argValue("--input");
-  const rows = input ? parseJsonl(await Bun.file(input).text()) : await readBundledInput();
+  const rowsAll = input ? parseJsonl(await Bun.file(input).text()) : await readBundledInput();
+  const rows = testOnly ? filterTestRows(rowsAll, await bundledTestIds()) : rowsAll;
 
   const selected = rows.filter((r) => langs.includes(langOf(r))).length;
-  log(`predict: head=${head} lang=${langs.join(",")} docs=${selected} input=${input ?? "bundled:data/swissgov.jsonl"}`);
+  log(`predict: head=${head} lang=${langs.join(",")}${testOnly ? " test" : ""} docs=${selected} input=${input ?? "bundled:data/swissgov.jsonl"}`);
 
   log("  loading engine (first run may be a little slow)");
   ensureModel();
