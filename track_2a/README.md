@@ -1,7 +1,7 @@
-# aperdiff — code details (Track 2A)
+# Code details (Track 2A)
 
-This directory holds the source of the submission. The build/run instructions and
-the results live in the repository-root [`README.md`](../README.md); the write-up
+The below is an AI generated summary of the code directory that holds the source of the submission. 
+The build/run instructions and the results live in the repository-root [`README.md`](../README.md); the write-up
 is in [`technical_report.md`](../technical_report.md).
 
 ## Layout
@@ -21,67 +21,67 @@ src/
 │           ├── hunk/         vendored diff/rendering layer (OpenTUI)
 │           └── progress/     worker-based per-token progress
 ├── python/              training / ablation / judging (PyTorch)
-│   ├── probationists.py      pair-probe architectures + training
+│   ├── probationists.py      pair-probe architectures + ablation + training
 │   ├── ablation.py           training-free 32-layer readout
 │   ├── judging.py            SwissGov-RSD harness replication
 │   ├── diffalign.py          unsupervised DiffAlign head
 │   ├── export.py             bake artifacts: gru.bin + swissgov.json(l)
-│   └── layerwise/            checkpoints (.pth) + dataset/ (SwissGov, iSTS)
+│   ├── layerwise/            checkpoints (*.pth) 
+│   └── dataset/              SwissGov + iSTS datasets in jsonl
 ├── libelthur-arm64.so   prebuilt CPU engine (Linux arm64)
 ├── libelthur-amd64.so   prebuilt CPU engine (Linux amd64)
 └── libelthur.dylib      prebuilt CPU engine (macOS arm64)
 ```
 
-## How it works
+## Apertus layer bands - Illustrative only
 
-Two heads over one frozen backbone (see `python/ABLATION.md` for the research
-narrative):
+A general mental model of how a decoder spreads work (surface → syntax → semantics → task → output). The names are heuristic; the signal peaks in the *Semantic build-up*
+band (layers 14–17).
 
-- **Capture.** Apertus is causal, so each side is read with the other side in
-  context using two passes: `[B][A]` keeps the English rows, `[A][B]` keeps the
-  other-language rows. Only residual sites **L14–17** are captured, and a
-  capture-only early exit after L15 makes this ~2× faster with bit-identical L15
-  vectors.
-- **DiffAlign (unsupervised).** `s = 1 − max_j cos(h_i, h_j)` — the maximum
-  cosine similarity to any token on the other side; training-free.
-- **Pair probe (supervised).** `[EN;XX]` token features are concatenated with a
-  segment marker and scored by a small bidirectional GRU (projection → LayerNorm
-  → GELU → GRU → per-token head), trained with BCE. Only these ~2M parameters are
-  learned. Architecture chosen by a `dev` screen (`probationists.py`); the final
-  checkpoint is `layerwise/pairprobe_best_L14-15-16-17_sum_bce_gru_devsel.pth`.
-
-## Headless CLI
-
-`app/src/terminalexec.ts` implements the judge-facing surface. In the container:
-
+```mermaid
+flowchart LR
+  subgraph L0["Blocks 0–3 · SURFACE & ORTHOGRAPHY"]
+    A0["0–3<br/>casing, spelling,<br/>subword / n-gram identity"]
+  end
+  subgraph L1["Blocks 4–9 · LOCAL SYNTAX / MORPHOLOGY"]
+    A1["4–9<br/>POS, agreement,<br/>short phrases"]
+  end
+  subgraph L2["Blocks 10–15 · SEMANTIC BUILD-UP"]
+    A2["10–15<br/>lexical meaning,<br/>composition"]
+  end
+  subgraph L3["Block 16 · MID-DEPTH SEMANTIC CORE"]
+    A3["16<br/>chosen by the notebook<br/>(≈ 50% depth)"]
+  end
+  subgraph L4["Blocks 17–21 · CROSS-LINGUAL SEMANTICS"]
+    A4["17–21<br/>paraphrase / translation<br/>invariance, abstract meaning"]
+  end
+  subgraph L5["Blocks 22–29 · TASK & DISCOURSE"]
+    A5["22–29<br/>intent, coherence,<br/>what to say next"]
+  end
+  subgraph L6["Blocks 30–31 · OUTPUT FORMATION"]
+    A6["30–31<br/>next-token / logit prep"]
+  end
+  A0 --> A1 --> A2 --> A3 --> A4 --> A5 --> A6
 ```
-results [--lang de,fr,it|all] [--test] [--json]
-predict [--head supervised|unsupervised|combined] [--lang …] \
-        [--input file.jsonl] [--output name] [--test] [--json]
---smoke [--smoke-fast]      --speedtest (alias --bench)
-```
 
-The `results`/`predict` tables print the paper's **per-document** metrics
-(`spearman`, `kendall`), computed in `app/src/libraries/clit/metrics.ts` with the
-same semantics as the SwissGov-RSD harness (pooled over both texts, gold `-1`
-dropped, predictions aligned to gold length).
+Apertus is a dense transformer, not an MoE: every block encodes information about the input tokens. We distill the intermediate representations of its multilingual understanding (the L14–17 band) to give the pair-probe a strong, stable signal.
+
 
 ## Engine libraries
 
-`libelthur-*.so` / `libelthur.dylib` are the compiled CPU engine (the Zig `core/`
-of the upstream `aperdiff` project). They are shipped prebuilt so the app can be
-compiled without a Zig toolchain. The Docker build stages the matching library as
-`app/libelthur.bin` before `bun build --compile`.
+`libelthur-*.so` / `libelthur.dylib` are the compiled CPU engine from a language called Zig. 
+They are shipped prebuilt so the app can be compiled without a Zig toolchain. 
+The Docker build stages the matching library as `app/libelthur.bin` before `bun build --compile`.
 
 ## Python pipeline
+Use the python pipeline to replicate ablation and export data for the TUI. 
 
 ```bash
 python -m venv .venv && . .venv/bin/activate && pip install -r python/requirements.txt
 
 python python/ablation.py --split val --limit 20 --calib-frac 0.35 --out ablation_devsel.json
 python python/judging.py --system probe --tag devsel --arch gru
-python python/export.py            # -> core/assets/gru.bin + app/src/data/swissgov.json(l)
+python python/export.py            # -> track_2a/src/app/src/data/swissgov.json(l)
 ```
 
-Feature caches (`python/layerwise/*_L14..17.pt`) are large and are **not** checked
-in; regenerate them with the capture scripts before training.
+Feature caches (`python/layerwise/*_L14..17.pt`) are large and are **not** checked in; regenerate them with the capture scripts before training (if needed).
