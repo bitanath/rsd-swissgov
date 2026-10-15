@@ -1,0 +1,3 @@
+# Run the layerwise.ipynb to generate the dataset. It will be too large to put into github anyway
+*.pt
+# *.pth ## we checkin the *.pth files for ultimate reproducibility (without training)
