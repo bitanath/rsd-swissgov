@@ -14,7 +14,7 @@ with gold labels (values as reported in the paper, ×100). ★ = best overall on
 (e.g. `20.6 / 56.1 = 36.7%`); the best ratio is bolded.
 
 | Technique                      | Type              | EN–DE    | EN–FR    | EN–IT    | DE %  | FR %  | IT %     |
-|--------------------------------|-------------------|--:-------|--:-------|--:-------|--:----|--:----|--:-------|
+|--------------------------------|-------------------|---------:|---------:|---------:|------:|------:|---------:|
 | DiffAlign · LaBSE ★            | unsupervised      | 20.6     | 8.2      | **25.6** | 36.7  | 18.8  | **39.3** |
 | DiffAlign · XLM-R+SimCSE       | unsupervised      | 19.2     | 10.0     | 23.4     | 34.2  | 22.9  | 35.9     |
 | DiffAlign · Qwen3-Embedding 4B | unsupervised      | 20.1     | 11.2     | 20.3     | 35.8  | 25.7  | 31.2     |
@@ -143,7 +143,7 @@ SwissGov-RSD **test** split (56/lang), official judging metric (global Spearman
 ×100, gold `-1` dropped).
 
 | method                                                  | EN–DE      | EN–FR      | EN–IT      |
-|---------------------------------------------------------|--:---------|--:---------|--:---------|
+|---------------------------------------------------------|-----------:|-----------:|-----------:|
 | DiffAlign · Apertus L15 (unsupervised)                  | 32.2       | 18.2       | 36.0       |
 | DiffAlign · Apertus L14–17 sum (unsupervised)           | 31.5       | 18.4       | 36.6       |
 | **Pair probe · GRU (frozen Apertus L14–17, dev-selected)** | **44.1** | **27.2** | **47.3** |
@@ -181,7 +181,7 @@ L14–17 probe band from `dev` alone. (Numbers are lower than the earlier
 `--split full` run because that run included the test split; those are superseded.)
 
 | Layer  | Heuristic name            | Spearman ρ (OLS) | Pearson r (OLS) | ρ (DoM) | AUC (DoM) | Sep   | ρ de   | ρ fr   | ρ it   | n     |
-|--:-----|---------------------------|--:---------------|--:--------------|--:------|--:--------|--:----|--:-----|--:-----|--:-----|--:----|
+|-------:|---------------------------|-----------------:|----------------:|--------:|----------:|------:|-------:|-------:|-------:|------:|
 | 0      | Surface & orthography     | 0.0891           | 0.0951          | 0.0860  | 0.5906    | 0.313 | 0.0662 | 0.0931 | 0.0714 | 26630 |
 | 1      | Surface & orthography     | 0.0755           | 0.0884          | 0.0694  | 0.5840    | 0.294 | 0.0516 | 0.0615 | 0.0759 | 26630 |
 | 2      | Surface & orthography     | 0.0612           | 0.0738          | 0.0575  | 0.5759    | 0.256 | 0.0289 | 0.0587 | 0.0634 | 26630 |
