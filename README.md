@@ -36,15 +36,16 @@ make run
 
 `make run` pulls the published multi-arch image and prints the **bundled results** table. In order to re-run an inference on the spot (with progress bar), simply use one of the comments below
 
-| Invocation                                                   | Explanation                                                                                                                                                              |
-|--------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `make run`                                                   | Shows the bundled results in a table, use JSON=1 to output as JSON                                                                                                          |
-| `make run MODE=predict HEAD=unsupervised LANG=it TEST=1`     | Choose a language and rerun predictions on test SwissGov set, only HEAD is required to rerun and by default runs over the entire set                                        |
-| `make run MODE=predict INPUT=custom.jsonl OUTPUT=out JSON=1` | Predict over a custom json file instead of SwissGov                                                                                                                         |
-| `make run MODE=results LANG=de JSON=1`                       | Show bundled results for a particular language and in JSON                                                                                                                  |
-| `make run MODE=tui`                                          | Run the interactive Terminal User Interface                                                                                                                                 |
-| `make run MODE=smoke SMOKE_FAST=1`                           | Just a quick test to see if everything is working correctly                                                                                                                 |
-| `make run MODE=speedtest`                                    | Benchmarks your system for TTFT, tok/s and prefill tok/s (anything above 10 tok/s and 30 prefill tok/s is quite usable, I tested at 16 tok/s and 60 prefill on Macbook Pro) |
+| Invocation                                                   | Explanation                                                                                                                                                                                                              |
+|--------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `make run`                                                   | Shows the bundled results in a table, use JSON=1 to output as JSON                                                                                                                                                       |
+| `make run MODE=predict HEAD=unsupervised LANG=it TEST=1`     | Choose a language and rerun predictions on test SwissGov set, only HEAD is required and by default it runs over the entire set unless TEST = 1 is specified. LANG filters the languages it is run on and can be omitted. |
+| `make run MODE=predict INPUT=custom.jsonl OUTPUT=out JSON=1` | Predict over a custom json file instead of SwissGov                                                                                                                                                                      |
+| `make run MODE=results LANG=de JSON=1`                       | Show bundled results for a particular language and in JSON                                                                                                                                                               |
+| `make run MODE=tui`                                          | Run the interactive Terminal User Interface                                                                                                                                                                              |
+| `make run MODE=smoke SMOKE_FAST=1`                           | Just a quick test to see if everything is working correctly                                                                                                                                                              |
+| `make run MODE=speedtest`                                    | Benchmarks your system for TTFT, tok/s and prefill tok/s (anything above 10 tok/s and 30 prefill tok/s is quite usable, I tested at 16 tok/s and 60 prefill on Macbook Pro)                                              |
+
 
 ### Parameters listed out: 
 - `IMAGE` (default `ghcr.io/bitanath/rsd-swissgov:latest`)
