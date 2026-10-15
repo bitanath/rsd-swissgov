@@ -1,0 +1,12 @@
+# Keep the build context tiny: the Dockerfile only needs track_2a/src/app/ and
+# track_2a/src/libelthur-*.so.
+.git
+.gitignore
+tmp
+outputs
+**/node_modules
+**/__pycache__
+**/*.pyc
+track_2a/src/python
+track_2a/data
+track_2a/docs
