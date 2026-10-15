@@ -1,4 +1,4 @@
-# The canonical Makefile lives at the repository root. This is just to make it idiot-proof.
+# Forwards to the canonical Makefile at the repository root.
 .DEFAULT_GOAL := run
 
 .PHONY: run build push help

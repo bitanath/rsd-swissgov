@@ -1,17 +1,17 @@
 ## Abstract
-For the Research Track 2A (UZH) - We beat the benchmarks proposed by [SwissGov RSD, M. Wastl et al](https://arxiv.org/pdf/2512.07538) using only Apertus 8B for the unsupervised set, and requiring only a lightweight 4M parameter encoder (single bidirectional GRU) on top of Apertus 8B for the supervised set. We do not retrain, finetune or otherwise alter Apertus 8B, for all practical purposes the model is completely frozen. All our work is completely reproducible on a local machine with a reasonable amount of RAM (~12 GB) and CPU cores (>= 8), we provide CPU only inference (accelerated using NEON SIMD).
+For the Research Track 2A (UZH) - We beat the benchmarks proposed by [SwissGov RSD, M. Wastl et al](https://arxiv.org/pdf/2512.07538) using only a frozen Apertus-1.5-8B for the unsupervised set, and requiring only a lightweight 4M parameter encoder (single bidirectional GRU) on top of a frozen Apertus-1.5-8B for the supervised set. We do not retrain, finetune or otherwise alter Apertus-1.5-8B, for all practical purposes the model is completely frozen. All our work is completely reproducible on a local machine with a reasonable amount of RAM (~12 GB) and CPU cores (>= 8), we provide CPU only inference (accelerated using NEON SIMD).
 
 ### Apertus-8B
-We use the Text-Only with the image encoder removed from: https://huggingface.co/andreasmartin/apertus-v1.5-8b-text and quantize it to 5-bit mixed quantization and upload it to: https://huggingface.co/justacoderwhocodes/apertus-1.5-text-only (personal huggingface)
+We use the Text-Only weights with the image encoder removed from: https://huggingface.co/andreasmartin/apertus-v1.5-8b-text and quantize it to 5-bit mixed quantization and upload it to: https://huggingface.co/justacoderwhocodes/apertus-1.5-text-only (personal huggingface).
 
 ### Results in brief
 
-SwissGov-RSD **test** split (56 docs/lang), token-level **Spearman ×100**, gold `-1` dropped. paper rows are reproduced from Wastl, Vamvas & Sennrich (ACL 2026), Table 3.
+Based on the SwissGov-RSD **test** split (56 docs/lang), token-level **Spearman ×100**, with gold `-1` dropped. paper rows are reproduced from Wastl, Vamvas & Sennrich (ACL 2026) -> Table 3.
 
 | System                                         | trained on         |    EN–DE |    EN–FR |    EN–IT |    macro |
 | :--------------------------------------------- | :----------------- | -------: | -------: | -------: | -------: |
 | DiffAlign · Apertus L15 *(ours)*               | —                  |     32.2 |     18.2 |     36.0 |     28.8 |
-| DiffAlign · Apertus L14–17 sum *(ours)*        | —                  |     31.5 |     18.4 |     36.6 |     28.8 |
+| DiffAlign · Apertus L14–17 sum *(ours)*        | —                  |   _31.5_ |   _18.4_ |   _36.6_ |   _28.8_ |
 | **Pair probe · Apertus L14–17 → GRU *(ours)*** | SwissGov in-domain | **44.1** | **27.2** | **47.3** | **39.5** |
 | DiffAlign · LaBSE *(paper)*                    | —                  |     20.6 |      8.2 |     25.6 |     18.1 |
 | DiffAlign · XLM-R + SimCSE *(paper)*           | —                  |     19.2 |     10.0 |     23.4 |     17.5 |
@@ -21,44 +21,50 @@ SwissGov-RSD **test** split (56 docs/lang), token-level **Spearman ×100**, gold
 | **Human annotator agreement (ceiling)**        | —                  | **56.1** | **43.6** | **65.1** | **54.9** |
 
 
-**Reading in brief** The paper's own finding is a large *generalization gap*: systems that score ~45–82 on synthetic iSTS-RSD collapse to ~0–26 on naturalistic SwissGov-RSD.
-Our in-domain, frozen-Apertus probe closes a large part of that gap and unlike the paper's fine-tuned rows can be (and is) trained only on SwissGov `dev`. The `test` split is used exactly once, for reporting. The CLI exposes the metrics **per document** (`spearman`, `kendall` columns in `results`/`predict`).
+**Reading in brief** -> The paper's own finding is a large *generalization gap*: systems that score ~45–82 on synthetic iSTS-RSD collapse to ~0–26 on naturalistic SwissGov-RSD.
+
+Our in-domain, frozen-Apertus probe closes a large part of that gap and unlike the paper's fine-tuned rows can be (and is) trained only on SwissGov `dev`. The `test` split is used exactly once, for reporting. The CLI exposes the metrics **per document** (`spearman`, `kendall` columns in `results`/`predict`). 
+
+However, we also **transparently show our results on either combination**, i.e. training on iSTS and inference on SwissGov, training on SwissGov and inference on iSTS, as well as unsupervised (no training) inference. Every combination beats every corresponding benchmark from the paper. Our entire results table is provided below.
 
 ## Objectives
 - To build a custom Apertus inference framework to output model tensors individually per layer
-    + This is shipped as a .dylib (for MacOS) and .so (for Linux) and highly optimized for ARM NEON CPUs
-    + We also cross compile to AMD64 (Intel) architecture but do not guarantee speed (however, results will be numerically stable)
+    + This is shipped as a `.dylib (for MacOS)` and `.so (for Linux)` and highly optimized for ARM NEON CPUs
+    + We also cross compile to `AMD64 (Intel)` architecture but do not guarantee speed (however, results will be numerically stable)
 - To determine the key intermediate layers that hold maximum contextual information
-    + We run ablation across 32 intermediate layers both on the splits and complete dataset
-    + For the ablation we determine the combination of layers carrying maximum correlation with gold labels
+    + We run ablation across 32 intermediate layers only on SwissGov dev splits
+    + For the ablation we determine the best layers carrying maximum correlation with gold labels
+    + This is **not** diffalign, instead it is just an ordinary least squares direction scored by ranked correlation
 - To run DiffAlign across these layers in order to perform an RSD unsupervised iteration
     + Layer 15 and Layers 14-17 combined are chosen and we report results in the unsupervised section
     + There is not too much of a difference between selecting single feature, vs combined features on SwissGov dataset
     + However, on the iSTS benchmark, the higher degree of information in combined layers leads to better scoring
 - To ablate classifiers, selecting a GRU arch in order to perform RSD supervised iteration
-    + Ablation is carried across Transformer, CNN (1d-conv), GRU and MLP. We find GRU best suited, CNN is a close second
-    + Both Layer 15 and Layers 14-17 again are used as priors
+    + Ablation is carried across Transformer, CNN (1d-conv), bilinear, xattn, GRU and MLP. We find GRU best suited, CNN is a close second
+    + Both Layer 15 and Layers 14-17 again are used as priors, and differences seen
     + Layer 14-17 combined has superior information and so produces better results on the classifier (no surprises there)
 - To also compare against the natural Human Annotator baseline vs our methods
-    + On in-domain testing, we can reach ~80-85% of human baseline, however, FR is a particularly difficult dataset
-- We report results appending to the format in the paper
+    + On in-domain validation, we can reach ~80-85% of human baseline, however, FR is a particularly difficult dataset, and impacts our in-domain test scores.
+- We report results appending to the properly formatted table in the paper
 
 ## Intuition
+---
 > Apertus 8B is basically a set of dense transformers that can be layerwise inferenced. The model itself is trained on relevant multilingual data, and contains an extremely rich set of priors, that other open source models (the paper uses `Llama 3.1 8B`) do not have. We basically exploit these priors in order to run predictions across encoded multilingual pairs and either diff align the layerwise outputs or train a tiny encoder head to perform supervised predictions.
+---
 
 ## Innovations
 Aside from the mechanical innovation of layerwise inference and encoder training, our key innovation is in the inference process itself.
 
-We perform two **partial** prefills of Apertus per pair — one per ordering — and neither runs the full model. Because Apertus is causal — a token only sees what's *before* it — you can't get both cross-contexts in one pass.
+We perform two **partial** prefills of Apertus per pair — one per ordering — and neither runs the full model. Because Apertus is causal — a token only sees what's *before* it — you can't get both cross-contexts in one pass. We prefill concatenated tokens, but keep only relevant features by index.
 
 - **Pass 1 = `[B][A]`** (German then English) → English tokens sit *after* German, so they attend to it → keep the English rows = `feats_a` (English sees German).
 - **Pass 2 = `[A][B]`** (English then German) → German tokens sit *after* English → keep the German rows = `feats_b` (German sees English).
 
 In `[A][B]` alone the English tokens are first, so they'd only see themselves (useless); the German tokens would see English. In `[B][A]` it's the reverse. So we need **both orders** to get each side's vector with the other language in context.
 
-> Cost note: that is two prefills, but each is a **partial** forward — a capture-only early exit breaks the layer loop at **L17**, so every pass runs layers 0→17 of 32. The total is therefore ≈ 2× an 18-layer prefill, **not** 2× the full model, and effectively ~1x of the full model. Each pass emits a per-token `res_ffn` residual for the whole concatenated sequence, mean-averaged over L14–17 → shape `(n_seq, dim)`; we keep basically get word-level features `feats_a (nwa, dim)` and `feats_b (nwb, dim)` after both passes.
+> Cost note: that is two prefills, but each is a **partial** forward — a capture-only early exit breaks the layer loop at **L17**, so every pass runs layers 0→17 of 32. The total is therefore ≈ 2× an 18-layer prefill, **not** 2× the full model, and effectively ~1.1x of the full model minus decode. Each pass emits a per-token `res_ffn` residual for the whole concatenated sequence, mean-averaged over L14–17 → shape `(n_seq, dim)`; we basically get word-level features `feats_a (nwa, dim)` and `feats_b (nwb, dim)` after both passes.
 
-This allows us to correctly inference even on an unaligned pair. For eg, the number of words in English and German, even for a semantically similar sentence might be drastically different, but by prefilling across merged tokens we essentially predict across the entire set, for both languages, thus ensuring an unbiased representation. 
+This allows us to correctly and speedily inference even on an unaligned pair. For eg, the number of words in English and German, even for a semantically similar sentence might be drastically different, but by prefilling across merged tokens we essentially predict across the entire set, for both languages, thus ensuring an unbiased representation. 
 
 ---
 ### Illustratively, One EN+DE pair (`admin_de_1`, 305 English words and 250 German words):
@@ -137,10 +143,10 @@ Rows marked *(paper)* reproduce Table 3 of Wastl et al. (2026). Their trained sy
 | **Pair probe·Apertus L14–17 sum->GRU (ours)** | iSTS `projected` 2.4k/lang| —              | **64.0** | **63.5** | **63.4** | _29.5_      | _13.1_   | _27.1_   |
 | *Human agreement ceiling*                     | —                         | —              | –        | –        | –        | *56.1*      | *43.6*   | *65.1*   |
 
-**Notes.**
+**Notes:**
 - Values are token-level Spearman ×100 pooled over both texts; `test` is the scored split, gold `-1` dropped.
 - **The probe is dev-selected** (trained + early-stopped on `dev` only); `test` is unseen, so the `dev-val` probe rows are **in-sample** (hence higher) than `test`.
-- **iSTS** columns are independent of the SwissGov split: DiffAlign is training-free (same iSTS on `test` and `dev-val` rows); the probe's iSTS is **zero-shot** transfer (that model, evaluated on the iSTS test set).
+- **iSTS** columns are independent of the SwissGov split: DiffAlign is training-free (same iSTS on `test` and `dev-val` rows); the probe's iSTS is **zero-shot** transfer (model, evaluated on the iSTS test set).
 
 
 ---
@@ -149,7 +155,7 @@ Rows marked *(paper)* reproduce Table 3 of Wastl et al. (2026). Their trained sy
 
 - **On SwissGov, our frozen-Apertus DiffAlign beats every published DiffAlign encoder** — macro **28.8** (test) vs the best paper encoder (LaBSE) at ≈ **18.1**.
 - **On synthetic iSTS-RSD the augmented probe reaches 64.0 / 63.5 / 63.4** — at the top of the paper's **fine-tuned-encoder** band (ModernBERT 53.8–63.0), above every unsupervised encoder (best bge-m3 47.5), only behind the large parameter fine-tuned LLM (GPT-4o-mini 81.6).
-- **There is no generalization gap:** Training on SwissGov and transferring to iSTS results in _only a 5 pp drop on iSTS_ and the other direction, training on iSTS and transferring to SwissGov results only a _~30 pp drop on SwissGov_ (this is because of some dataset issues, as below) as compared to an _~75pp drop on finetuning GPT-4o mini_
+- **There is no catastrophic generalization gap:** Training on SwissGov and transferring to iSTS actually results in _**a ~15 pp rise on iSTS**_ and the other direction, training on iSTS and transferring to SwissGov results only a _~30-40 pp drop on SwissGov_ (this is because of some dataset issues, elucidated below) as compared to an _~75pp drop on finetuning GPT-4o mini_
 - **Dataset choices** We are transparent about reporting on validation split vs reporting on truly unseen data (test split). However, we observe that training the model on SwissGov dataset translates to a much cleaner and transferable result, probably because that is what _**frozen Apertus is used to seeing (long sentences with actual semantic meaning)**_, training on iSTS results in the model being a bit more confused (shorter sentences, word differences over meaning differences)
 - **Local & sovereign:** everything runs locally on frozen Apertus weights in ~5 GB RAM (no hosted endpoint, no gateway timeout).
 
@@ -157,11 +163,11 @@ Rows marked *(paper)* reproduce Table 3 of Wastl et al. (2026). Their trained sy
 
 - **iSTS-RSD:** 2.4k samples/lang, English side labelled only. The `projected` training labels are the **benchmark authors' released data** (they used GPT-4o-mini for label projection); that model is **not part of our system** — we only consume the published file with the empty/overlong pairs filtered.
 - **SwissGov** dataset is small, only 224 docs in total, the results may be improved as more annotated datasets become available
-- **Practical Human Ceiling** We approach ~80-85% of the human agreement ceiling, but need better annotated data (especially on French) to train better models
+- **Practical Human Ceiling** We approach ~80-85% of the human agreement ceiling on validation set, but need better annotated data (especially on French) to train better models
 
 ## Appendix - Layerwise Ablation (with semantic interpretations)
 
-**Result:** the signal is strongest at **layer 15** (ρ = **0.2318**, AUC = 0.7612) i.e. the top of the *Semantic build-up* band with AUC peaking one layer earlier at **layer 14** (0.7664); the plateau spans roughly **layers 14 to 17**
+**Result:** the signal is strongest at **layer 15** (ρ = **0.2318**, AUC = 0.7612) i.e. the top of the *Semantic build-up* band with AUC peaking one layer earlier at **layer 14** (0.7664); the plateau spans roughly **layers 14 to 17**. Carried out on val (dev) only and never sees test
 
 | Layer  | Heuristic name            | Spearman ρ (OLS) | Pearson r (OLS) | ρ (DoM) | AUC (DoM) | Sep   | ρ de   | ρ fr   | ρ it   | n     |
 |-------:|---------------------------|-----------------:|----------------:|--------:|----------:|------:|-------:|-------:|-------:|------:|
@@ -201,7 +207,7 @@ Rows marked *(paper)* reproduce Table 3 of Wastl et al. (2026). Their trained sy
 
 ## What this says
 
-* We look for where `Spearman ρ (OLS)` (and `AUC`) peaks like a local minima and that band is the candidate region for the real probe.
+* We look for where `Spearman ρ (OLS)` (and `AUC`) peaks like a local maxima and that band is the candidate region for the real probe.
 * Cross-lingual stability matters for RSD: we prefer a band where `ρ de`, `ρ fr`, `ρ it` agree in sign and magnitude rather than one language dominating.
 * The chosen `LAYER` is one that makes the probe's life easier, i.e. by giving a clear signal to the parametric classifier we ensure a distinct output on a small-parameter classifier
 
@@ -211,5 +217,5 @@ Rows marked *(paper)* reproduce Table 3 of Wastl et al. (2026). Their trained sy
 1. M. Wastl, J. Vamvas, R. Sennrich. *SwissGov-RSD: A Human-annotated, Cross-lingual Benchmark for Token-level Recognition of Semantic Differences Between Related Documents.* ACL 2026. arXiv:2512.07538.
 2. J. Vamvas, R. Sennrich. *Simple and Effective Text Alignment for Machine Translation Evaluation.* 2023.
 3. Swiss AI Initiative. *Apertus.* 2026. https://huggingface.co/swiss-ai/Apertus-v1.5-8B
-3. Martin Andreas. *Apertus Text Only Checkpoint.* 2026. https://huggingface.co/andreasmartin/apertus-v1.5-8b-text/
-3. Nath Bitan. *Apertus 5 bit Mixed Quantized GGUF.* 2026. https://huggingface.co/justacoderwhocodes/apertus-1.5-text-only/
+4. Martin Andreas. *Apertus Text Only Checkpoint.* 2026. https://huggingface.co/andreasmartin/apertus-v1.5-8b-text/
+5. Nath Bitan. *Apertus 5 bit Mixed Quantized GGUF.* 2026. https://huggingface.co/justacoderwhocodes/apertus-1.5-text-only/
