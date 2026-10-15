@@ -3,7 +3,7 @@
 Two outputs, both deterministic and re-runnable -> Final outcome to bake into the exe:
 
   core/assets/gru.bin        fp16 weight blob for the pair probe -> @embedFile
-  app/src/data/swissgov.json hardcoded SwissGov-RSD pairs (Test first, then Dev) for GT.
+  app/src/data/swissgov.json + .jsonl  SwissGov-RSD pairs in full-set order for GT/CLI.
 
 Weight blob layout (little-endian):
     magic   [4] "GRU1"
@@ -67,28 +67,38 @@ def export_gru(ckpt_path: Path, out_path: Path) -> None:
 
 
 def export_dataset(data_dir: Path, out_path: Path) -> None:
+    """Full-set order: per language merge test+dev and sort by numeric id, matching the
+    benchmark's ``gold_labels/full/`` order so the authors' evaluator can zip-and-filter
+    a full-set prediction file down to ``--split test``."""
     records = []
-    for disk_split, split in SPLITS:
-        for lang in LANGS:
+    for lang in LANGS:
+        merged: dict[str, tuple[str, dict]] = {}
+        for disk_split, split in SPLITS:
             path = data_dir / disk_split / f"{lang}.jsonl"
-            rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
-            rows.sort(key=lambda r: int(str(r["id"]).rsplit("_", 1)[1]))
-            for r in rows:
-                records.append({
-                    "id": r["id"],
-                    "split": split,
-                    "lang": lang,
-                    "text_a": r["text_a"],
-                    "text_b": r["text_b"],
-                    "labels_a": r["labels_a"],
-                    "labels_b": r["labels_b"],
-                })
+            for line in path.read_text().splitlines():
+                if not line.strip():
+                    continue
+                r = json.loads(line)
+                merged[r["id"]] = (split, r)
+        for rid in sorted(merged, key=lambda i: int(str(i).rsplit("_", 1)[1])):
+            split, r = merged[rid]
+            records.append({
+                "id": r["id"],
+                "split": split,
+                "lang": lang,
+                "text_a": r["text_a"],
+                "text_b": r["text_b"],
+                "labels_a": r["labels_a"],
+                "labels_b": r["labels_b"],
+            })
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(records, separators=(",", ":")))
+    jsonl_path = out_path.with_suffix(".jsonl")
+    jsonl_path.write_text("".join(json.dumps(r) + "\n" for r in records))
     per = {}
     for r in records:
         per[(r["split"], r["lang"])] = per.get((r["split"], r["lang"]), 0) + 1
-    print(f"wrote {out_path}  docs={len(records)}  {per}  "
+    print(f"wrote {out_path} + {jsonl_path.name}  docs={len(records)}  {per}  "
           f"({out_path.stat().st_size / 1e6:.1f} MB)")
 
 
