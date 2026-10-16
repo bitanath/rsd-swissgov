@@ -1,31 +1,24 @@
 ## Abstract
-For the Research Track 2A (UZH) - We beat the benchmarks proposed by [SwissGov RSD, M. Wastl et al](https://arxiv.org/pdf/2512.07538) using only a frozen Apertus-1.5-8B for the unsupervised set, and requiring only a lightweight 4M parameter encoder (single bidirectional GRU) on top of a frozen Apertus-1.5-8B for the supervised set. We do not retrain, finetune or otherwise alter Apertus-1.5-8B, for all practical purposes the model is completely frozen. All our work is completely reproducible on a local machine with a reasonable amount of RAM (~12 GB) and CPU cores (>= 8), we provide CPU only inference (accelerated using NEON SIMD).
+For the Research Track 2A (UZH) - We beat the benchmarks proposed by [SwissGov RSD, M. Wastl et al](https://arxiv.org/pdf/2512.07538) and close the generalization gap training only a lightweight 4M parameter encoder (bidirectional GRU) for the supervised set, and using only a frozen Apertus-1.5-8B for DiffAlign on the unsupervised set, and . We do not retrain, finetune or otherwise alter Apertus-1.5-8B. We provide SIMD accelerated CPU only inference reproducible on a local machine with reasonable amount of RAM (~12 GB) and cores (>= 8).
 
 ### Apertus-8B
-We use the Text-Only weights with the image encoder removed from: https://huggingface.co/andreasmartin/apertus-v1.5-8b-text and quantize it to 5-bit mixed quantization and upload it to: https://huggingface.co/justacoderwhocodes/apertus-1.5-text-only (personal huggingface).
+Text-Only weights with the image encoder removed and quantized to 5-bit (mixed). The URLs containing the weights (huggingface hosted) are provided in the [References section at the end](#references).
 
 ### Results in brief
 
-Based on the SwissGov-RSD **test** split (56 docs/lang), token-level **Spearman ×100**, with gold `-1` dropped. paper rows are reproduced from Wastl, Vamvas & Sennrich (ACL 2026) -> Table 3.
+Based on the SwissGov-RSD **test** split (56 docs/lang), **Spearman ×100**, with gold `-1` dropped. Paper rows are reproduced from Table 3 in the paper.
 
 | System                                         | trained on         |    EN–DE |    EN–FR |    EN–IT |    macro |
 | :--------------------------------------------- | :----------------- | -------: | -------: | -------: | -------: |
 | DiffAlign · Apertus L15 *(ours)*               | —                  |     32.2 |     18.2 |     36.0 |     28.8 |
-| DiffAlign · Apertus L14–17 sum *(ours)*        | —                  |   _31.5_ |   _18.4_ |   _36.6_ |   _28.8_ |
-| **Pair probe · Apertus L14–17 → GRU *(ours)*** | SwissGov in-domain | **44.1** | **27.2** | **47.3** | **39.5** |
+| **DiffAlign · Apertus L14–17 sum *(ours)***    | —                  |   _31.5_ |   _18.4_ |   _36.6_ |   **_28.8_** |
+| **Pair probe · Apertus L14–17 → GRU *(ours, trained)*** | SwissGov dev-val | **44.1** | **27.2** | **47.3** | **39.5** |
 | DiffAlign · LaBSE *(paper)*                    | —                  |     20.6 |      8.2 |     25.6 |     18.1 |
-| DiffAlign · XLM-R + SimCSE *(paper)*           | —                  |     19.2 |     10.0 |     23.4 |     17.5 |
-| DiffAlign · bge-m3 *(paper)*                   | —                  |     14.8 |      9.9 |     13.6 |     12.8 |
 | GPT-4o *(paper, few-shot)*                     | —                  |      4.2 |      1.2 |      5.5 |      3.6 |
 | ModernBERT-large (EN) *(paper, fine-tuned)*     | iSTS               |      5.7 |      1.3 |      4.0 |      3.7 |
 | **Human annotator agreement (ceiling)**        | —                  | **56.1** | **43.6** | **65.1** | **54.9** |
 
-
-**Reading in brief** -> The paper's own finding is a large *generalization gap*: systems that score ~45–82 on synthetic iSTS-RSD collapse to ~0–26 on naturalistic SwissGov-RSD.
-
-Our in-domain, frozen-Apertus probe closes a large part of that gap and unlike the paper's fine-tuned rows can be (and is) trained only on SwissGov `dev`. The `test` split is used exactly once, for reporting. The CLI exposes the metrics **per document** (`spearman`, `kendall` columns in `results`/`predict`). 
-
-However, we also **transparently show our results on either combination**, i.e. training on iSTS and inference on SwissGov, training on SwissGov and inference on iSTS, as well as unsupervised (no training) inference. Every combination beats every corresponding benchmark from the paper. Our entire results table is provided below.
+**Additional Results** -> When tested on `iSTS projected` the Spearman actually improves to `59.2/59.2/59.5` vs `44.1/27.2/47.3` on SwissGov `test` for `EN-DE,EN-FR and EN-IT` pairs. The `test` split is used exactly once, for reporting, however, we also **transparently show our FULL results on either combination**, i.e. training on iSTS and inference on SwissGov generalizes poorly, training on SwissGov and inference on iSTS generalizes well, and unsupervised (no training) inference is competitive. **Every combination beats the corresponding benchmark** from the paper. Find our [full results below](#results).
 
 ## Objectives
 - To build a custom Apertus inference framework to output model tensors individually per layer
