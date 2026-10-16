@@ -1,9 +1,11 @@
-# Aperdiff — Recognition of Semantic Differences on SwissGov-RSD
+# Aperdiff — Beating SwissGov-RSD benchmarks by more than 1.5x using frozen Apertus-1.5-8B
 
 We perform Cross-lingual **Recognition of Semantic Differences (RSD)** over Swiss government documents, built on a **frozen** [`swiss-ai/Apertus-v1.5-8B`](https://huggingface.co/swiss-ai/Apertus-v1.5-8B) residual stream and a light trained probe. It ships as a self-contained TUI + headless CLI whose only dependency is a container runtime.
 
 > **HackApertus — Track 2A (Academia):** *Detecting Cross-Lingual Semantic
 > Differences in Swiss Government Websites* (UZH).
+
+Our results are present in our [Technical Report](technical_report.md)
 
 ## Local + CPU-only Inference
 
